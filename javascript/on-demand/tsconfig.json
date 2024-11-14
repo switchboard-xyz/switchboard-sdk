@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "module": "ES6",
+    "outDir": "./dist/esm",
+    "rootDir": "./src",
+    "noImplicitAny": false,
+    "strict": true,
+    "esModuleInterop": true,
+    "declaration": true,
+    "declarationDir": "./dist/types/esm",
+    "declarationMap": true,
+    "moduleResolution": "node",
+    "baseUrl": "./",
+    "paths": {
+      "@coral-xyz/anchor-30": ["node_modules/@coral-xyz/anchor-30"],
+      "@solana/web3.js": ["node_modules/@solana/web3.js"]
+    },
+    "typeRoots": ["./node_modules/@types", "./types"],
+    "skipLibCheck": true,
+    "strictNullChecks": false,
+    "strictPropertyInitialization": false,
+    "sourceMap": true,
+    "inlineSources": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules"]
+}
