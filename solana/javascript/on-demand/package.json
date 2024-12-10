@@ -22,7 +22,7 @@
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1",
     "@solana/web3.js": "^1.95.8",
     "@solworks/soltoolkit-sdk": "^0.0.37",
-    "@switchboard-xyz/common": "latest
+    "@switchboard-xyz/common": "latest",
     "axios": "^1.7.8",
     "big.js": "^6.2.2",
     "bs58": "^6.0.0",
