@@ -1,0 +1,16 @@
+[package]
+authors = ["Albert Hermida <albert@switchboard.xyz>"]
+name = "Switchboard"
+version = "1.0.0"
+
+[addresses]
+switchboard = "_"
+std = "0x1"
+
+[dev-addresses]
+switchboard = '0x55'
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "main", subdir = "aptos-move/framework/aptos-framework"}
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "main", subdir = "aptos-move/framework/aptos-stdlib"}
+MoveStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "main", subdir = "aptos-move/framework/move-stdlib"}

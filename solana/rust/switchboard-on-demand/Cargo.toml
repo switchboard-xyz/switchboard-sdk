@@ -27,6 +27,7 @@ all-features = ["secrets", "ipfs", "cpi", "no-entrypoint", "client"]
 pid_override = []
 client = ["anchor-spl", "solana-client", "solana-sdk", "anchor-lang", "anchor-client", "switchboard-common/client", "tokio", "tokio-util", "reqwest"]
 devnet = []
+doc_cfg = []
 
 [dependencies]
 arc-swap = "1.6"

@@ -1,0 +1,18 @@
+{
+  "name": "aptos-on-demand",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/superagent": "^8.1.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@aptos-labs/ts-sdk": "^1.32.1",
+    "@switchboard-xyz/aptos-sdk": "latest",
+    "@switchboard-xyz/on-demand": "latest",
+    "superagent": "^10.1.1"
+  }
+}
