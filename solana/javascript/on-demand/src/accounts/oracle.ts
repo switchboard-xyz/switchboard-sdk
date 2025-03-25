@@ -13,6 +13,7 @@ export interface OracleAccountData {
     enclaveSigner: web3.PublicKey;
     mrEnclave: Uint8Array;
     verificationStatus: number;
+    // padding1
     verificationTimestamp: BN;
     validUntil: BN;
     quoteRegistry: Uint8Array;
@@ -23,6 +24,14 @@ export interface OracleAccountData {
     lastRotateSlot: BN;
     guardianApprovers: web3.PublicKey[];
     guardianApproversLen: number;
+    // padding2
+    stagingEd25519Signer: web3.PublicKey;
+    stagingSecp256K1Signer: Uint8Array;
+    ethSigner: Uint8Array;
+    // ebuf4
+    // ebuf3
+    // ebuf2
+    // ebuf1
   };
   authority: web3.PublicKey;
   queue: web3.PublicKey;
@@ -32,9 +41,13 @@ export interface OracleAccountData {
   gatewayUri: Uint8Array;
   permissions: BN;
   isOnQueue: boolean;
+  // padding1
   lutSlot: BN;
   lastRewardEpoch: BN;
   operator: web3.PublicKey;
+  // ebuf3
+  // ebuf2
+  // ebuf1
 }
 
 /**

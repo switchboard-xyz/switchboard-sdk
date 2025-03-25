@@ -7,18 +7,31 @@ import { web3 } from '@coral-xyz/anchor-30';
 import { Buffer } from 'buffer';
 
 export interface StateData {
+  bump: number;
+  testOnlyDisableMrEnclaveCheck: boolean;
+  enableStaking: boolean;
+  // padding1
   authority: web3.PublicKey;
   guardianQueue: web3.PublicKey;
-  lutSlot: BN;
+  // reserved1
+  epochLength: BN;
+  // reserved2
   switchMint: web3.PublicKey;
-  advisories: Uint16Array;
+  sgxAdvisories: Uint16Array;
   advisoriesLen: number;
+  // padding2
   flatRewardCutPercentage: number;
   enableSlashing: boolean;
-  subsidyAmount: number;
+  // padding3
+  lutSlot: BN;
   baseReward: number;
-  enableStaking: boolean;
-  testOnlyDisableMrEnclaveCheck: boolean;
+  // padding4
+  subsidyAmount: BN;
+  // ebuf6
+  // ebuf5
+  // ebuf4
+  // ebuf3
+  // ebuf2
   costWhitelist: web3.PublicKey[];
 }
 
