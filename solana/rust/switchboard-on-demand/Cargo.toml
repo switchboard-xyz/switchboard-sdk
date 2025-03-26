@@ -48,10 +48,11 @@ switchboard-common = { version = "0.11.3", path = "../switchboard-common", featu
 solana-address-lookup-table-program = ">=1.17"
 solana-program = ">=1.17,<2"
 spl-token = { version = ">=3,<4", features = ["no-entrypoint"] }
-spl-associated-token-account = { version = ">=2", features = ["no-entrypoint"] }
-anchor-lang = { version = "0.30.1", optional = true }
-anchor-spl = { version = "0.30.1", optional = true }
-anchor-client = { version = "0.30.1", optional = true }
+spl-associated-token-account = { version = ">=2,<3", features = ["no-entrypoint"] }
+spl-token-2022 = { version = "<=1", features = ["no-entrypoint"] }
+anchor-lang = { version = "0.29.0", optional = true }
+anchor-spl = { version = "0.29.0", optional = true }
+anchor-client = { version = "0.29.0", optional = true }
 solana-client = { version = "1.17.16, <2.0", optional = true }
 solana-sdk = { version = "1.17.16, <2.0", optional = true }
 tokio = { version = "^1.41", features = ["full", "tracing"], optional = true }
