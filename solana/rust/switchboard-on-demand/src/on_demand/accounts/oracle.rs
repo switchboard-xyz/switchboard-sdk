@@ -10,7 +10,6 @@ use crate::impl_account_deserialize;
 use crate::{cfg_client, get_sb_program_id, OnDemandError, Quote};
 cfg_client! {
     use crate::address_lookup_table;
-    use crate::find_lut_of;
     use solana_sdk::address_lookup_table::AddressLookupTableAccount;
     use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
     use crate::find_lut_signer;

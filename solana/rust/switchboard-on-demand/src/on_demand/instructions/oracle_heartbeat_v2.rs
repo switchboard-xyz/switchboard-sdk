@@ -50,13 +50,10 @@ impl ToAccountMetas for OracleHeartbeatV2Accounts {
 
 cfg_client! {
 use solana_client::nonblocking::rpc_client::RpcClient;
-use jito_restaking_client::programs::JITO_RESTAKING_ID;
-use jito_vault_client::programs::JITO_VAULT_ID;
 use crate::get_sb_program_id;
 
 impl OracleHeartbeatV2 {
     pub async fn build_ix(client: &RpcClient, args: OracleHeartbeatV2Args) -> Result<Instruction, OnDemandError> {
-        let state = State::fetch_async(client).await?;
         let oracle_data = OracleAccountData::fetch_async(client, args.oracle).await?;
         let pid = if cfg!(feature = "devnet") {
             get_sb_program_id("devnet")

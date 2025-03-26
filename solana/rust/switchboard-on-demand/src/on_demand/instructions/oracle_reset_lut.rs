@@ -57,8 +57,6 @@ impl ToAccountMetas for OracleResetLutAccounts {
 cfg_client! {
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
-use jito_restaking_client::programs::JITO_RESTAKING_ID;
-use jito_vault_client::programs::JITO_VAULT_ID;
 use crate::get_sb_program_id;
 use crate::find_lut_signer;
 
