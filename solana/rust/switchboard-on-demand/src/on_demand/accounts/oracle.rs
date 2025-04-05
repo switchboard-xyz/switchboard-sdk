@@ -177,11 +177,6 @@ impl OracleAccountData {
         self.enclave.enclave_signer
     }
 
-    pub fn is_stale(&self, clock: &Clock) -> bool {
-        let staleness_minutes = (clock.unix_timestamp - self.last_heartbeat) / 60;
-        staleness_minutes > 30
-    }
-
     pub fn is_verified(&self, clock: &Clock) -> bool {
         match self.enclave.verification_status.into() {
             VerificationStatus::VerificationOverride => true,

@@ -59,7 +59,7 @@ console.log("Switchboard address:", switchboardAddress);
 // ================================================================================================
 
 const aggregatorInitTx = await Aggregator.initTx(client, signer, {
-  name: "BTC and USD",
+  name: "BTC/USD",
   minSampleSize: 1,
   maxStalenessSeconds: 60,
   maxVariance: 1e9,
@@ -79,7 +79,6 @@ const [aggTransactionResponse] = await aptos.transaction.simulate.simple({
 
 console.log("User transaction response:", aggregatorInitTx);
 
-
 const res = await aptos.signAndSubmitTransaction({
   signer: account,
   transaction: aggregatorInitTx,
@@ -94,11 +93,11 @@ console.log(result);
 // Get aggregator id
 //================================================================================================
 
-// const aggregatorAddress =
-//   "address" in result.changes[0] ? result.changes[0].address : undefined;
-
 const aggregatorAddress =
-  "0x4db24a4f0c2bf8b892c299b494937be223cfafc159a6841bbe8305761e1881a";
+  "address" in result.changes[0] ? result.changes[0].address : undefined;
+
+// const aggregatorAddress =
+//   "0x4db24a4f0c2bf8b892c299b494937be223cfafc159a6841bbe8305761e1881a";
 
 if (!aggregatorAddress) {
   throw new Error("Failed to initialize aggregator");
@@ -117,9 +116,12 @@ const aggregator = new Aggregator(client, aggregatorAddress);
 
 console.log("aggregator", await aggregator.loadData());
 
-const { responses, updates, updateTx } = await aggregator.fetchUpdate(
-  signer
-);
+const { responses, updates, updateTx } = await aggregator.fetchUpdate(signer);
+
+if (!updateTx) {
+  console.log("No updates to submit");
+  process.exit(0);
+}
 
 const [userTransactionResponse] = await aptos.transaction.simulate.simple({
   signerPublicKey: account.publicKey,
@@ -141,4 +143,3 @@ const resTx = await aptos.signAndSubmitTransaction({
 const resultTx = await waitForTx(aptos, resTx.hash);
 
 console.log("Transaction result:", resultTx);
-
