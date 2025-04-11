@@ -17,7 +17,7 @@ export interface StateData {
   epochLength: BN;
   // reserved2
   switchMint: web3.PublicKey;
-  sgxAdvisories: Uint16Array;
+  advisories: Uint16Array;
   advisoriesLen: number;
   // padding2
   flatRewardCutPercentage: number;
