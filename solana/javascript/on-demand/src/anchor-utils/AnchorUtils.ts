@@ -10,6 +10,7 @@ import {
   AnchorProvider,
   BorshEventCoder,
   Program,
+  Provider,
   Wallet,
   web3,
 } from '@coral-xyz/anchor-30';
@@ -88,12 +89,30 @@ export class AnchorUtils {
    */
   static async loadProgramFromConnection(
     connection: web3.Connection,
-    wallet?: Wallet
+    wallet?: Wallet,
+    programId?: web3.PublicKey
   ) {
-    const isDevnet = await isDevnetConnection(connection);
-    const pid = isDevnet ? ON_DEMAND_DEVNET_PID : ON_DEMAND_MAINNET_PID;
     const provider = new AnchorProvider(connection, wallet ?? readonlyWallet);
-    return Program.at(pid, provider);
+    return AnchorUtils.loadProgramFromProvider(provider, programId);
+  }
+
+  /**
+   * Loads an Anchor program from a provider.
+   *
+   * @param {Provider} provider - The provider to load the program from.
+   * @param {web3.PublicKey} programId - An optional program ID to load the program from.
+   * @returns {Promise<Program>} A promise that resolves to the loaded Anchor program.
+   */
+  static async loadProgramFromProvider(
+    provider: Provider,
+    programId?: web3.PublicKey
+  ) {
+    const pid = await (async () => {
+      if (programId) return programId;
+      const isSolanaDevnet = await isDevnetConnection(provider.connection);
+      return isSolanaDevnet ? ON_DEMAND_DEVNET_PID : ON_DEMAND_MAINNET_PID;
+    })();
+    return await Program.at(pid, provider);
   }
 
   /**
