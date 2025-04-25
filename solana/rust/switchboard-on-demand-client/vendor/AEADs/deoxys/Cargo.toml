@@ -1,0 +1,38 @@
+[package]
+name = "deoxys"
+version = "0.0.2"
+description = """
+Pure Rust implementation of the Deoxys Authenticated Encryption with Associated
+Data (AEAD) cipher, including the Deoxys-II variant which was selected by the
+CAESAR competition as the first choice for in-depth security
+"""
+authors = ["RustCrypto Developers, zer0x64"]
+license = "Apache-2.0 OR MIT"
+documentation = "https://docs.rs/deoxys"
+repository = "https://github.com/RustCrypto/AEADs/tree/master/deoxys"
+homepage = "https://github.com/RustCrypto"
+keywords = ["aead", "deoxys", "deoxys-i", "deoxys-ii"]
+categories = ["cryptography", "no-std"]
+readme = "README.md"
+edition = "2018"
+
+[dependencies]
+aead = { version = "0.4", default-features = false }
+aes = { version = "0.7.5", features=["hazmat"], default-features = false }
+subtle = { version = "2", default-features = false }
+zeroize = { version = "1", default-features = false }
+
+[dev-dependencies]
+aead = { version = "0.4", features = ["dev"], default-features = false }
+hex-literal = "0.3"
+
+[features]
+default = ["alloc"]
+std = ["aead/std", "alloc"]
+alloc = ["aead/alloc"]
+heapless = ["aead/heapless"]
+stream = ["aead/stream"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
