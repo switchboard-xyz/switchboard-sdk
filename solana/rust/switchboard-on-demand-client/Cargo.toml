@@ -40,6 +40,7 @@ zeroize = ">=1.6.0"
 devnet = []
 
 [patch.crates-io]
-curve25519-dalek = { path = "vendor/curve25519-dalek/curve25519-dalek" }
+curve25519-dalek = { path = "vendor/curve25519-dalek" }
+# curve25519-dalek = { git = "https://github.com/solana-labs/curve25519-dalek.git", rev = "c14774464c4d38de553c6ef2f48a10982c1b4801" }
 aes-gcm-siv = { path = "vendor/AEADs/aes-gcm-siv" }
 
