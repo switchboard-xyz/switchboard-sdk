@@ -80,7 +80,7 @@ impl QueueAccountData {
 
     /// Loads the QueueAccountData from the given key.
     pub async fn load(client: &RpcClient, key: &Pubkey) -> Result<QueueAccountData, AnyhowError> {
-        let account = client.get_account_data(key).await?;
+        let account = client.get_account_data(&key).await?;
         let buf = account[8..].to_vec();
         let parsed: &QueueAccountData = bytemuck::try_from_bytes(&buf)
             .map_err(|e| anyhow!("Failed to parse QueueAccountData: {:?}", e))?;

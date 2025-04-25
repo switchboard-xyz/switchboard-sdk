@@ -64,7 +64,7 @@ pub async fn load_lookup_tables<T: LutOwner + bytemuck::Pod>(
         .get_multiple_accounts(keys)
         .await?
         .into_iter()
-        .map(account_to_vec)
+        .map(|acct: Option<solana_sdk::account::Account>| account_to_vec(acct))
         .collect::<Vec<_>>();
     let mut lut_keys = Vec::new();
     let mut out = Vec::new();
@@ -79,7 +79,7 @@ pub async fn load_lookup_tables<T: LutOwner + bytemuck::Pod>(
         lut_keys.push(lut_key);
     }
     let lut_datas = client
-        .get_multiple_accounts(&lut_keys)
+        .get_multiple_accounts(&lut_keys.as_slice())
         .await?
         .into_iter()
         .map(|data| data.unwrap_or_default().data.to_vec())

@@ -152,7 +152,7 @@ impl PullFeed {
         key: &Pubkey,
     ) -> Result<PullFeedAccountData, AnyhowError> {
         let account = client
-            .get_account_data(key)
+            .get_account_data(&key)
             .await
             .map_err(|_| anyhow!("PullFeed.load_data: Account not found"))?;
         let account = account[8..].to_vec();
