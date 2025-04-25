@@ -3,11 +3,18 @@ use anyhow_ext::anyhow;
 use anyhow_ext::Context;
 use anyhow_ext::Error as AnyhowError;
 use base58::ToBase58;
+use hex;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde::de::Error as DeError;
 use solana_sdk::genesis_config::ClusterType;
 use solana_sdk::pubkey::Pubkey;
+use switchboard_utils::utils::median;
 use rust_decimal::Decimal;
+use futures::{Stream, StreamExt};
+use tokio::time::Duration;
+use tokio::time::interval;
+use tokio_stream::wrappers::IntervalStream;
 
 #[derive(Serialize, Deserialize)]
 pub struct StoreResponse {
@@ -36,12 +43,66 @@ pub struct SimulateSolanaFeedsResponse {
     pub feed: String,
     pub feedHash: String,
     pub results: Vec<Option<Decimal>>,
+    #[serde(skip_deserializing, default)]
+    pub result: Option<Decimal>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SimulateSuiFeedsResponse {
+    pub feed: String,
+    pub feedHash: String,
+    // The TS endpoint returns the results as strings. You can choose to parse them into Decimal if desired.
+    pub results: Vec<String>,
+    // The result is already computed by the server; hence, no median calculation here.
+    #[serde(skip_deserializing, default)]
+    pub result: Option<Decimal>,
+    #[serde(default)]
+    pub stdev: Option<Decimal>,
+    #[serde(default)]
+    pub variance: Option<Decimal>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SimulateFeedsResponse {
     pub feedHash: String,
     pub results: Vec<Decimal>,
+    #[serde(skip_deserializing, default)]
+    pub result: Decimal,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SuiOracleResult {
+    pub successValue: String,
+    pub isNegative: bool,
+    pub timestamp: u64,
+    pub oracleId: String,
+    #[serde(serialize_with = "bytes_to_hex", deserialize_with = "hex_to_bytes")]
+    pub signature: Vec<u8>,
+}   
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SuiFeedConfigs {
+    pub feedHash: String,
+    pub maxVariance: u64,
+    pub minResponses: u64,
+    pub minSampleSize: u64,
+}
+
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SuiUpdateResponse {
+    pub aggregator_id: Option<String>,
+    pub results: Vec<SuiOracleResult>,
+    pub feedConfigs: SuiFeedConfigs,
+    pub queue: String,
+    pub fee: u64,
+    pub failures: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FetchSuiUpdatesResponse {
+    pub responses: Vec<SuiUpdateResponse>,
+    pub failures: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +110,24 @@ pub struct CrossbarClient {
     crossbar_url: String,
     verbose: bool,
     client: Client,
+}
+
+fn hex_to_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    hex::decode(&s).map_err(DeError::custom)
+}
+
+
+fn bytes_to_hex<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    // Convert the byte vector into a hex string.
+    let hex_string = hex::encode(bytes);
+    serializer.serialize_str(&hex_string)
 }
 
 fn cluster_type_to_string(cluster_type: ClusterType) -> String {
@@ -76,7 +155,6 @@ impl CrossbarClient {
         }
     }
 
-    /// Fetch feed jobs from the crossbar gateway
     /// # Arguments
     /// * `feed_hash` - The feed hash of the jobs it performs
     /// # Returns
@@ -177,7 +255,9 @@ impl CrossbarClient {
         resp.json().await.context("Failed to parse response")
     }
 
-    /// Simulate feed responses from the crossbar gateway
+    /// Simulate feed responses from the crossbar gateway for Solana feeds.
+    /// In addition to deserializing the JSON, compute the median for each response
+    /// and store it in the `result` field as an Option<Decimal>.
     pub async fn simulate_solana_feeds(
         &self,
         network: ClusterType,
@@ -205,12 +285,27 @@ impl CrossbarClient {
             return Err(anyhow!("Bad status code {}", status.as_u16()));
         }
 
-        Ok(serde_json::from_str(&raw)?)
+        let mut responses: Vec<SimulateSolanaFeedsResponse> = serde_json::from_str(&raw)?;
+        // Compute the median result for each response
+        for response in responses.iter_mut() {
+            // Collect non-None decimals
+            let valid: Vec<Decimal> = response
+                .results
+                .iter()
+                .filter_map(|x| *x)
+                .collect();
+            response.result = if valid.is_empty() {
+                None
+            } else {
+                Some(median(valid).expect("Failed to compute median"))
+            };
+        }
+        Ok(responses)
     }
 
-    /// Simulate feed responses from the crossbar gateway
-    /// # Arguments
-    /// * `feed_hashes` - The feed hashes to simulate
+    /// Simulate feed responses from the crossbar gateway.
+    /// In addition to deserializing the JSON, compute the median for each response
+    /// and store it in the `result` field.
     pub async fn simulate_feeds(
         &self,
         feed_hashes: &[&str],
@@ -240,7 +335,177 @@ impl CrossbarClient {
             return Err(anyhow!("Bad status code {}", status.as_u16()));
         }
 
-        resp.json().await.context("Failed to parse response")
+        let mut responses: Vec<SimulateFeedsResponse> =
+            resp.json().await.context("Failed to parse response")?;
+        // Compute the median result for each response
+        for response in responses.iter_mut() {
+            response.result = median(response.results.clone()).expect("Failed to compute median");
+        }
+        Ok(responses)
+    }
+
+    /// Fetch the Sui feed update from the crossbar gateway.
+    ///
+    /// # Arguments
+    /// * `network` - The Sui network identifier (e.g., "mainnet", "testnet")
+    /// * `aggregator_addresses` - A slice of aggregator address strings.
+    ///
+    /// # Returns
+    /// * `Result<FetchSuiUpdatesResponse, AnyhowError>` - The response containing Sui feed update data.
+    pub async fn fetch_sui_updates(
+        &self,
+        network: &str,
+        aggregator_addresses: &[&str],
+    ) -> Result<FetchSuiUpdatesResponse, AnyhowError> {
+        if aggregator_addresses.is_empty() {
+            return Err(anyhow!("Aggregator addresses are empty"));
+        }
+        let feeds_param = aggregator_addresses.join(",");
+        let url = format!("{}/updates/sui/{}/{}", self.crossbar_url, network, feeds_param);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send fetch Sui updates request")?;
+        let status = resp.status();
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!(
+                    "{}: {}",
+                    status,
+                    resp.text().await.context("Failed to fetch response text")?
+                );
+            }
+            return Err(anyhow!("Bad status code {}", status.as_u16()));
+        }
+        let mut update_response: FetchSuiUpdatesResponse =
+            resp.json().await.context("Failed to parse fetch Sui updates response")?;
+        
+        // If the server did not include aggregator_id or it is empty,
+        // and if the number of responses matches the number of aggregator_addresses,
+        // we assign the aggregator addresses to the corresponding responses.
+        if update_response.responses.len() == aggregator_addresses.len() {
+            for (resp_item, &agg_id) in update_response.responses.iter_mut().zip(aggregator_addresses) {
+                if resp_item.aggregator_id.is_none() || resp_item.aggregator_id.as_ref().unwrap().is_empty() {
+                    resp_item.aggregator_id = Some(agg_id.to_string());
+                }
+            }
+        }
+        Ok(update_response)
+    }
+
+    /// Simulate feed responses for Sui from the crossbar gateway.
+    ///
+    /// # Arguments
+    /// * `network` - The Sui network identifier (e.g. "mainnet", "testnet")
+    /// * `feed_ids` - The list of feed ids as string slices.
+    ///
+    /// # Returns
+    /// * `Result<Vec<SimulateSuiFeedsResponse>, AnyhowError>` - The current simulated results for the requested feeds.
+    pub async fn simulate_sui_feeds(
+        &self,
+        network: &str,
+        feed_ids: &[&str],
+    ) -> Result<Vec<SimulateSuiFeedsResponse>, AnyhowError> {
+        if feed_ids.is_empty() {
+            return Err(anyhow!("Feed ids are empty"));
+        }
+        let feeds_param = feed_ids.join(",");
+        let url = format!("{}/simulate/sui/{}/{}", self.crossbar_url, network, feeds_param);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send simulate sui feeds request")?;
+        let status = resp.status();
+        let raw = resp
+            .text()
+            .await
+            .context("Failed to fetch response for simulate sui feeds")?;
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!("{}: {}", status, raw);
+            }
+            return Err(anyhow!("Bad status code {}", status.as_u16()));
+        }
+        // Parse the response. We assume the TS server returns JSON matching SimulateSuiFeedsResponse.
+        let responses: Vec<SimulateSuiFeedsResponse> =
+            serde_json::from_str(&raw).context("Failed to parse simulate sui feeds response")?;
+        Ok(responses)
+    }
+
+
+    /// Stream the simulation of feed responses from the crossbar gateway.
+    pub fn stream_simulate_feeds<'a>(
+        &'a self,
+        feed_hashes: Vec<&'a str>,
+        poll_interval: Duration,
+    ) -> impl Stream<Item = Result<Vec<SimulateFeedsResponse>, AnyhowError>> + 'a {
+        // Create an interval timer stream.
+        let interval_stream = IntervalStream::new(interval(poll_interval));
+        let feed_hashes = feed_hashes.clone();
+        // For each tick, call the simulate_feeds function.
+        interval_stream.then(move |_| {
+            let feed_hashes = feed_hashes.clone();
+            async move {
+                self.simulate_feeds(&feed_hashes).await
+            }
+        })
+    }
+
+    /// Stream the simulation of feed responses from the crossbar gateway for Solana feeds.
+    pub fn stream_simulate_solana_feeds<'a>(
+        &'a self,
+        network: solana_sdk::genesis_config::ClusterType,
+        feed_pubkeys: &'a [solana_sdk::pubkey::Pubkey],
+        poll_interval: Duration,
+    ) -> impl Stream<Item = Result<Vec<SimulateSolanaFeedsResponse>, AnyhowError>> + 'a {
+        let interval_stream = IntervalStream::new(interval(poll_interval));
+        interval_stream.then(move |_| {
+            let network = network.clone();
+            async move {
+                self.simulate_solana_feeds(network, feed_pubkeys).await
+            }
+        })
+    }
+
+    /// Stream the simulation of Sui feed responses from the crossbar gateway.
+    pub fn stream_simulate_sui_feeds<'a>(
+        &'a self,
+        network: &'a str,
+        feed_ids: Vec<&'a str>,
+        poll_interval: Duration,
+    ) -> impl Stream<Item = Result<Vec<SimulateSuiFeedsResponse>, AnyhowError>> + 'a {
+        let interval_stream = IntervalStream::new(interval(poll_interval));
+        interval_stream.then(move |_| {
+            let feed_ids = feed_ids.clone();
+            async move { self.simulate_sui_feeds(network, &feed_ids).await }
+        })
+    }
+
+    /// Stream the Sui feed update responses from the crossbar gateway.
+    ///
+    /// # Arguments
+    /// * `network` - The Sui network identifier (e.g., "mainnet", "testnet")
+    /// * `aggregator_addresses` - A vector of aggregator address strings.
+    /// * `poll_interval` - The polling interval for updates.
+    ///
+    /// # Returns
+    /// * `impl Stream<Item = Result<FetchSuiUpdatesResponse, AnyhowError>>`
+    ///    - A stream of Sui update responses.
+    pub fn stream_sui_updates<'a>(
+        &'a self,
+        network: &'a str,
+        aggregator_addresses: Vec<&'a str>,
+        poll_interval: Duration,
+    ) -> impl Stream<Item = Result<FetchSuiUpdatesResponse, AnyhowError>> + 'a {
+        let interval_stream = IntervalStream::new(interval(poll_interval));
+        interval_stream.then(move |_| {
+            let aggregator_addresses = aggregator_addresses.clone();
+            async move { self.fetch_sui_updates(network, &aggregator_addresses).await }
+        })
     }
 }
 
