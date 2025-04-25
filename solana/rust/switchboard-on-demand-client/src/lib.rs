@@ -14,10 +14,6 @@ pub mod recent_slothashes;
 pub use recent_slothashes::*;
 pub mod accounts;
 pub use accounts::*;
-#[cfg(feature = "solana_sdk_1_16")]
-pub mod lut;
-#[cfg(feature = "solana_sdk_1_16")]
-pub use lut::*;
 pub mod lut_owner;
 use crate::oracle_job::OracleJob;
 use anyhow_ext::Error as AnyhowError;

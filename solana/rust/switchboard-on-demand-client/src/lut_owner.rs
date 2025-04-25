@@ -6,14 +6,9 @@ use anyhow_ext::anyhow;
 use anyhow_ext::Error as AnyhowError;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::account::Account;
-#[cfg(not(feature = "solana_sdk_1_16"))]
 use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
-#[cfg(not(feature = "solana_sdk_1_16"))]
 use solana_sdk::address_lookup_table::state::AddressLookupTable;
-#[cfg(not(feature = "solana_sdk_1_16"))]
 use solana_sdk::address_lookup_table::AddressLookupTableAccount;
-#[cfg(feature = "solana_sdk_1_16")]
-use solana_sdk::address_lookup_table_account::AddressLookupTableAccount;
 use solana_sdk::pubkey::Pubkey;
 
 pub fn find_lut_signer(k: &Pubkey) -> Pubkey {

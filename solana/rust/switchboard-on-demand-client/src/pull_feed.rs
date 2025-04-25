@@ -15,10 +15,7 @@ use dashmap::DashMap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use solana_client::nonblocking::rpc_client::RpcClient;
-#[cfg(not(feature = "solana_sdk_1_16"))]
 use solana_sdk::address_lookup_table::AddressLookupTableAccount;
-#[cfg(feature = "solana_sdk_1_16")]
-use solana_sdk::address_lookup_table_account::AddressLookupTableAccount;
 use solana_sdk::instruction::AccountMeta;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
@@ -28,10 +25,6 @@ use std::sync::Arc;
 use tokio::join;
 use tokio::sync::OnceCell;
 use sha2::{Digest, Sha256};
-use solana_sdk::secp256k1_instruction::DATA_START;
-use solana_sdk::secp256k1_instruction::SecpSignatureOffsets;
-use solana_sdk::secp256k1_instruction::SIGNATURE_SERIALIZED_SIZE;
-use solana_sdk::secp256k1_instruction::construct_eth_pubkey;
 use crate::secp256k1::Secp256k1InstructionUtils;
 use crate::secp256k1::SecpSignature;
 
@@ -436,7 +429,7 @@ impl PullFeed {
         let latest_slot = SlotHashSysvar::get_latest_slothash(client)
             .await
             .context("PullFeed.fetchUpdateIx: Failed to fetch latest slot")?;
-        
+
         // Call the gateway consensus endpoint and fetch signatures
         let price_signatures = gateway
             .fetch_signatures_consensus(FetchSignaturesConsensusParams {
@@ -481,11 +474,11 @@ impl PullFeed {
             .oracle_responses
             .iter()
             .map(|oracle_response| SecpSignature {
-                eth_address: hex::decode(&oracle_response.eth_address)  
+                eth_address: hex::decode(&oracle_response.eth_address)
                     .unwrap()
                     .try_into()
                     .expect("slice with incorrect length"),
-                signature: base64.decode(&oracle_response.signature)  
+                signature: base64.decode(&oracle_response.signature)
                     .unwrap()
                     .try_into()
                     .expect("slice with incorrect length"),
@@ -519,7 +512,7 @@ impl PullFeed {
                 }
             })
             .collect();
-    
+
         // Attach feed accounts and oracle accounts (plus their stats accounts) as remaining accounts.
         for feed in &feed_pubkeys {
             remaining_accounts.push(AccountMeta::new(*feed, false));
