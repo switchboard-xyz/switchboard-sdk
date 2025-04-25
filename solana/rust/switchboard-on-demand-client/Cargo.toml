@@ -27,8 +27,9 @@ serde_derive = "1.0.209"
 serde_json = "1.0"
 sha2 = "0.10.8"
 dashmap = "6.0.1"
-solana-client = "=1.18.26"
-solana-sdk = "=1.18.26"
+solana-client = ">=1.18"
+solana-sdk = ">=1.18"
+solana-zk-token-sdk = ">=1.18"
 tokio = { version = "^1.39", features = ["full"] }
 tokio-stream = ">=0.1.17"
 switchboard-utils = "0.9.2"
@@ -41,4 +42,5 @@ devnet = []
 
 [patch.crates-io]
 curve25519-dalek = { git = "https://github.com/anza-xyz/curve25519-dalek.git", rev = "c14774464c4d38de553c6ef2f48a10982c1b4801" }
+aes-gcm-siv = { git = "https://github.com/RustCrypto/AEADs", rev = "6105d7a5591aefa646a95d12b5e8d3f55a9214ef" }
 
