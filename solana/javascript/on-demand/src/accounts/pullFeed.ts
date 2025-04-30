@@ -814,7 +814,10 @@ export class PullFeed {
     const isSolana = getIsSolana(params.chain);
     const isMainnet = getIsMainnet(params.network);
 
-    const feeds = NonEmptyArrayUtils.validate(params.feeds);
+    const feeds = (() => {
+      if (NonEmptyArrayUtils.safeValidate(params.feeds)) return params.feeds;
+      throw new Error('Invalid `feeds` array: cannot be empty');
+    })();
     const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
 
     // Validate that (1) all of the feeds specified exist and (2) all of the feeds are on the same
@@ -984,7 +987,10 @@ export class PullFeed {
     const isSolana = getIsSolana(params.chain);
     const isMainnet = getIsMainnet(params.network);
 
-    const feeds = NonEmptyArrayUtils.validate(params.feeds);
+    const feeds = (() => {
+      if (NonEmptyArrayUtils.safeValidate(params.feeds)) return params.feeds;
+      throw new Error('Invalid `feeds` array: cannot be empty');
+    })();
     const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
 
     // Validate that (1) all of the feeds specified exist and (2) all of the feeds are on the same

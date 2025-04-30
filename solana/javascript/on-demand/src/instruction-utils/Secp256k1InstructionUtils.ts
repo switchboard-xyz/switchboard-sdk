@@ -28,10 +28,12 @@ export class Secp256k1InstructionUtils {
     // Ensure that the `instructionIndex` is both a valid finite number and non-negative
     if (!Number.isFinite(instructionIndex) || instructionIndex < 0) {
       throw new Error('Invalid instruction index');
+    } else if (!NonEmptyArrayUtils.safeValidate(signatures)) {
+      // Ensure that the `signatures` array is non-empty and that all signatures share the same
+      // common message
+      throw new Error('Invalid `signatures` array: cannot be empty');
     }
-    // Ensure that the `signatures` array is non-empty and that all signatures share the same
-    // common message
-    NonEmptyArrayUtils.validate(signatures);
+
     const diffIdx = signatures.findIndex(
       sig => !sig.message.equals(signatures[0].message)
     );
