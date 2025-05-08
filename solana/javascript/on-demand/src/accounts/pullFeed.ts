@@ -176,6 +176,7 @@ export class PullFeed {
     feedHash: Buffer;
     minSampleSize: number;
   } | null;
+  data: PullFeedAccountData | null;
   jobs: IOracleJob[] | null;
   lut: web3.AddressLookupTableAccount | null;
 
@@ -277,6 +278,58 @@ export class PullFeed {
     })();
     if (hash.byteLength === 32) return hash;
     throw new Error('Feed hash must be 32 bytes');
+  }
+
+  async fetchQueue(): Promise<Queue> {
+    const data = await this.loadData();
+    return new Queue(this.program, data.queue);
+  }
+
+  async fetchGatewayUrl(crossbarClient_?: CrossbarClient): Promise<string> {
+    const crossbarClient = crossbarClient_ ?? CrossbarClient.default();
+
+    // Start parallel tasks
+    const loadConfigsPromise = this.loadConfigs();
+    const preHeatPromise = this.preHeatLuts();
+    const fetchQueuePromise = this.fetchQueue();
+
+    // Wait for all in parallel
+    await Promise.all([loadConfigsPromise, preHeatPromise, fetchQueuePromise]);
+    const queue = await fetchQueuePromise;
+
+    // Fetch gateway and load jobs in parallel
+    const [gw] = await Promise.all([
+      queue.fetchGateway(),
+      this.loadJobs(crossbarClient),
+    ]);
+
+    return gw.gatewayUrl;
+  }
+
+  async preHeatFeed(crossbarClient: CrossbarClient = CrossbarClient.default()) {
+    const loadConfigsPromise = this.loadConfigs();
+    const preHeatPromise = this.preHeatLuts();
+    const fetchQueuePromise = this.fetchQueue();
+
+    // Wait for all in parallel
+    await Promise.all([loadConfigsPromise, preHeatPromise, fetchQueuePromise]);
+
+    // Fetch gateway and load jobs in parallel
+    await this.loadJobs(crossbarClient);
+  }
+
+  async loadJobs(
+    crossbarClient: CrossbarClient = CrossbarClient.default()
+  ): Promise<IOracleJob[]> {
+    if (this.jobs) {
+      return this.jobs!;
+    }
+    const configs = await this.loadConfigs();
+    const feedHash = Buffer.from(configs.feedHash);
+    this.jobs = await crossbarClient
+      .fetch(feedHash.toString('hex'))
+      .then(resp => resp.jobs);
+    return this.jobs!;
   }
 
   /**
@@ -463,8 +516,7 @@ export class PullFeed {
    */
   async fetchUpdateIx(
     params: {
-      // Optionally specify the gateway to use. Else, the gateway is automatically fetched.
-      gateway?: string;
+      gateway: string;
       // Number of signatures to fetch.
       numSignatures?: number;
       jobs?: IOracleJob[];
@@ -543,7 +595,7 @@ export class PullFeed {
    * @param program - The Anchor program instance
    * @param params - The parameters object
    * @param params.feed - PullFeed address to fetch updates for
-   * @param params.gateway - Optional gateway URL to use for fetching updates
+   * @param params.gateway - gateway URL to use for fetching updates
    * @param params.chain - Optional chain identifier (defaults to "solana")
    * @param params.network - Optional network identifier ("mainnet", "mainnet-beta", "testnet", "devnet")
    * @param params.numSignatures - Number of signatures to fetch
@@ -563,7 +615,7 @@ export class PullFeed {
   static async fetchUpdateIx(
     params: {
       pullFeed: PullFeed;
-      gateway?: string;
+      gateway: string;
       chain?: string;
       network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
       numSignatures: number;
@@ -594,7 +646,7 @@ export class PullFeed {
     const [ixns, luts, report] = await PullFeed.fetchUpdateManyIx(
       params.pullFeed.program,
       {
-        feeds: [params.pullFeed.pubkey],
+        feeds: [params.pullFeed],
         chain: params.chain,
         network: params.network,
         gateway: params.gateway,
@@ -648,7 +700,7 @@ export class PullFeed {
   static async fetchUpdateIxSvm(
     params: {
       pullFeed: PullFeed;
-      gateway?: string;
+      gateway: string;
       chain?: string;
       network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
       numSignatures: number;
@@ -698,9 +750,7 @@ export class PullFeed {
       (await RecentSlotHashes.fetchLatestNSlothashes(connection, 30));
 
     const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
-    const jobs = await crossbarClient
-      .fetch(Buffer.from(feedData.feedHash).toString('hex'))
-      .then(resp => resp.jobs);
+    const jobs = await params.pullFeed.loadJobs(crossbarClient);
 
     const { responses, failures } = await Queue.fetchSignatures(solanaProgram, {
       gateway: params.gateway,
@@ -778,7 +828,7 @@ export class PullFeed {
    * @param program - The Anchor program instance.
    * @param params_ - The parameters object.
    * @param params_.feeds - An array of PullFeed account public keys.
-   * @param params_.gateway - The gateway URL to use. If not provided, the gateway is automatically fetched.
+   * @param params_.gateway - The gateway URL to use
    * @param params_.recentSlothashes - The recent slothashes to use. If not provided, the latest 30 slothashes are fetched.
    * @param params_.numSignatures - The number of signatures to fetch.
    * @param params_.crossbarClient - Optionally specify the CrossbarClient to use.
@@ -794,10 +844,10 @@ export class PullFeed {
   static async fetchUpdateManyIx(
     program: Program,
     params: {
-      feeds: web3.PublicKey[];
+      feeds: PullFeed[];
       chain?: string;
       network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      gateway?: string;
+      gateway: string;
       recentSlothashes?: Array<[BN, string]>;
       numSignatures: number;
       crossbarClient?: CrossbarClient;
@@ -823,14 +873,28 @@ export class PullFeed {
     // Validate that (1) all of the feeds specified exist and (2) all of the feeds are on the same
     // queue. Assuming that these conditions are met, we can map the feeds' data to their configs to
     // request signatures from a gateway.
-    const feedDatas = await PullFeed.loadMany(program, feeds);
+    let needFetch = false;
+    for (const feed of feeds) {
+      if (feed.data === null) {
+        needFetch = true;
+        break;
+      }
+    }
+    let feedDatas: (PullFeedAccountData | null)[] = [];
+    if (needFetch) {
+      feedDatas = await PullFeed.loadMany(program, feeds);
+    } else {
+      for (const feed of feeds) {
+        feedDatas.push(feed.data!);
+      }
+    }
     const queue: web3.PublicKey = feedDatas[0]?.queue ?? web3.PublicKey.default;
     const feedConfigs: FeedRequest[] = [];
     for (let idx = 0; idx < feedDatas.length; idx++) {
       const data = feedDatas[idx];
       if (!data) {
-        const pubkey = feeds[idx];
-        throw new Error(`No feed found at ${pubkey.toBase58()}}`);
+        const feed = feeds[idx];
+        throw new Error(`No feed found at ${feed.pubkey.toBase58()}}`);
       } else if (!queue.equals(data.queue)) {
         throw new Error('All feeds must be on the same queue');
       }
@@ -913,7 +977,7 @@ export class PullFeed {
         const feedHashHex = Buffer.from(data!.feedHash).toString('hex');
         return feedHashHex === median_response.feed_hash;
       });
-      if (feedIndex >= 0) return feeds[feedIndex];
+      if (feedIndex >= 0) return feeds[feedIndex].pubkey;
       if (debug) {
         console.warn(`Feed not found for hash: ${median_response.feed_hash}`);
       }
@@ -967,10 +1031,10 @@ export class PullFeed {
   static async fetchUpdateManyLightIx(
     program: Program,
     params: {
-      feeds: web3.PublicKey[];
+      feeds: PullFeed[];
       chain?: string;
       network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      gateway?: string;
+      gateway: string;
       recentSlothashes?: Array<[BN, string]>;
       numSignatures: number;
       crossbarClient?: CrossbarClient;
@@ -996,23 +1060,21 @@ export class PullFeed {
     // Validate that (1) all of the feeds specified exist and (2) all of the feeds are on the same
     // queue. Assuming that these conditions are met, we can map the feeds' data to their configs to
     // request signatures from a gateway.
-    const feedDatas = await PullFeed.loadMany(program, feeds);
+    const feedDatas = await PullFeed.loadMany(program, params.feeds);
     const queue: web3.PublicKey = feedDatas[0]?.queue ?? web3.PublicKey.default;
     const feedConfigs: FeedRequest[] = [];
     for (let idx = 0; idx < feedDatas.length; idx++) {
       const data = feedDatas[idx];
       if (!data) {
-        const pubkey = feeds[idx];
-        throw new Error(`No feed found at ${pubkey.toBase58()}}`);
+        const feed = feeds[idx];
+        throw new Error(`No feed found at ${feed.pubkey.toBase58()}}`);
       } else if (!queue.equals(data.queue)) {
         throw new Error('All feeds must be on the same queue');
       }
       feedConfigs.push({
         maxVariance: data.maxVariance.toNumber() / 1e9,
         minResponses: data.minResponses,
-        jobs: await crossbarClient
-          .fetch(Buffer.from(data.feedHash).toString('hex'))
-          .then(resp => resp.jobs),
+        jobs: await params.feeds[idx].loadJobs(crossbarClient),
       });
     }
 
@@ -1080,18 +1142,20 @@ export class PullFeed {
     //
 
     // We only want to include feeds that have succcessful responses returned.
-    const feedPubkeys = response.median_responses.map(median_response => {
-      // For each successful 'median' response, locate a feed that has the same corresponding feed hash.
-      const feedIndex = feedDatas.findIndex(data => {
-        const feedHashHex = Buffer.from(data!.feedHash).toString('hex');
-        return feedHashHex === median_response.feed_hash;
-      });
-      if (feedIndex >= 0) return feeds[feedIndex];
-      if (debug) {
-        console.warn(`Feed not found for hash: ${median_response.feed_hash}`);
+    const feedPubkeys: web3.PublicKey[] = response.median_responses.map(
+      median_response => {
+        // For each successful 'median' response, locate a feed that has the same corresponding feed hash.
+        const feedIndex = feedDatas.findIndex(data => {
+          const feedHashHex = Buffer.from(data!.feedHash).toString('hex');
+          return feedHashHex === median_response.feed_hash;
+        });
+        if (feedIndex >= 0) return params.feeds[feedIndex].pubkey;
+        if (debug) {
+          console.warn(`Feed not found for hash: ${median_response.feed_hash}`);
+        }
+        return web3.PublicKey.default;
       }
-      return web3.PublicKey.default;
-    });
+    );
     // For each oracle response, create the oracle and oracle stats accounts.
     const oraclePubkeys = response.oracle_responses.map(response => {
       return new web3.PublicKey(Buffer.from(response.oracle_pubkey, 'hex'));
@@ -1265,7 +1329,11 @@ export class PullFeed {
    *  @throws if the feed account does not exist.
    */
   async loadData(): Promise<PullFeedAccountData> {
-    return await this.program.account['pullFeedAccountData'].fetch(this.pubkey);
+    if (this.data) return this.data;
+    this.data = await this.program.account['pullFeedAccountData'].fetch(
+      this.pubkey
+    );
+    return this.data!;
   }
 
   /**
@@ -1277,9 +1345,15 @@ export class PullFeed {
    */
   static async loadMany(
     program: Program,
-    pubkeys: web3.PublicKey[]
+    feeds: PullFeed[]
   ): Promise<(PullFeedAccountData | null)[]> {
-    return await program.account['pullFeedAccountData'].fetchMultiple(pubkeys);
+    const datas = await program.account['pullFeedAccountData'].fetchMultiple(
+      feeds.map(f => f.pubkey)
+    );
+    for (let i = 0; i < datas.length; i++) {
+      feeds[i].data = datas[i];
+    }
+    return datas;
   }
 
   /**
