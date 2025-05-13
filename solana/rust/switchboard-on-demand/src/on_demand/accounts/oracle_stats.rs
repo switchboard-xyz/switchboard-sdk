@@ -58,20 +58,4 @@ impl Owner for OracleStatsAccountData {
 impl Discriminator for OracleStatsAccountData {
     const DISCRIMINATOR: [u8; 8] = [180, 157, 178, 234, 240, 27, 152, 179];
 }
-cfg_client! {
-    use crate::impl_account_deserialize;
 
-    impl_account_deserialize!(OracleStatsAccountData);
-}
-impl OracleStatsAccountData {
-    cfg_client! {
-
-        pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
-            pubkey: Pubkey,
-        ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
-        }
-
-    }
-}

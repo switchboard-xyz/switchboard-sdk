@@ -4,7 +4,7 @@ use solana_program::pubkey::Pubkey;
 use crate::anchor_traits::*;
 #[allow(unused_imports)]
 use crate::impl_account_deserialize;
-use crate::{cfg_client, get_sb_program_id};
+use crate::{get_sb_program_id};
 
 const STATE_SEED: &[u8] = b"STATE";
 
@@ -12,7 +12,7 @@ const STATE_SEED: &[u8] = b"STATE";
 pub struct StateEpochInfo {
     pub id: u64,
     pub reserved1: u64,
-    pub slot_end: u64,
+    pub slot_end: u64
 }
 
 #[repr(C)]
@@ -41,10 +41,6 @@ pub struct State {
 }
 unsafe impl Pod for State {}
 unsafe impl Zeroable for State {}
-
-cfg_client! {
-    impl_account_deserialize!(State);
-}
 
 impl Discriminator for State {
     const DISCRIMINATOR: [u8; 8] = [216, 146, 107, 94, 104, 75, 182, 177];
@@ -86,12 +82,4 @@ impl State {
         pda_key
     }
 
-    cfg_client! {
-        pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
-        ) -> std::result::Result<Self, crate::OnDemandError> {
-            let pubkey = State::get_pda();
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
-        }
-    }
 }

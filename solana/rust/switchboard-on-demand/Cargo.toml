@@ -1,6 +1,6 @@
 [package]
 name = "switchboard-on-demand"
-version = "0.3.4"
+version = "0.3.7"
 # docs.rs autobuild has difficulty with ahash dep. Host yuorself at https://tiiny.host/
 documentation = "https://docs.rs/switchboard-on-demand/latest/switchboard_on_demand"
 edition = "2021"
@@ -18,47 +18,21 @@ name = "switchboard_on_demand"
 doctest = false
 
 [features]
-default = ["cpi"]
-no-entrypoint = []
-cpi = ["no-entrypoint"]
-ipfs = ["switchboard-common/ipfs"]
-all-features = ["ipfs", "cpi", "no-entrypoint", "client"]
+default = []
 pid_override = []
-client = ["anchor-spl", "solana-client", "solana-sdk", "anchor-lang", "anchor-client", "switchboard-common/client", "tokio", "tokio-util"]
 devnet = []
 doc_cfg = []
-anchor = ["anchor-spl", "anchor-lang"]
-secrets = []
 
 [dependencies]
-arc-swap = "1.6"
-async-trait = "0.1.77"
-base64 = "0.21.4"
+base64 = "0.21.7"
 bincode = { version = "^1" }
-borsh = { version = "0.10.3" }
+borsh = { version = "0.10.4" }
 bytemuck = "^1"
-futures = "0.3"
-lazy_static = "1.4.0"
-libsecp256k1 = "0.7.1"
-log = { version = "0.4", features = ["kv_unstable", "kv_unstable_std"] }
+libsecp256k1 = "0.7.2"
 rust_decimal = "^1"
 serde = { version = "^1", features = ["derive"] }
-sha2 = "0.10.8"
+sha2 = "0.10.9"
+solana-program = ">=1.18"
+spl-associated-token-account = { version = ">=2", features = ["no-entrypoint"] }
+spl-token = { version = ">=3", features = ["no-entrypoint"] }
 switchboard-common = { version = "0.11.3", path = "../switchboard-common", features = [] }
-solana-address-lookup-table-program = ">=1.17"
-solana-program = ">=1.17,<2"
-spl-token = { version = ">=3,<4", features = ["no-entrypoint"] }
-spl-associated-token-account = { version = ">=2,<3", features = ["no-entrypoint"] }
-spl-token-2022 = { version = "<=1", features = ["no-entrypoint"] }
-anchor-lang = { version = "0.29.0", optional = true }
-anchor-spl = { version = "0.29.0", optional = true }
-anchor-client = { version = "0.29.0", optional = true }
-solana-client = { version = "1.17.16, <2.0", optional = true }
-solana-sdk = { version = "1.17.16, <2.0", optional = true }
-tokio = { version = "^1.41", features = ["full", "tracing"], optional = true }
-tokio-util = { version = "0.7.10", features = ["time"], optional = true }
-once_cell = "1.20.2"
-jito-vault-client = { git = "https://github.com/mgild/restaking", branch = "jito-ncn-anchor-bindings", features = ["anchor"] }
-jito-restaking-client = { git = "https://github.com/mgild/restaking", branch = "jito-ncn-anchor-bindings", features = ["anchor"] }
-anyhow = "1.0.97"
-

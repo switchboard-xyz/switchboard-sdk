@@ -9,7 +9,7 @@ use crate::anchor_traits::*;
 use crate::impl_account_deserialize;
 #[allow(unused_imports)]
 use crate::OracleAccountData;
-use crate::{cfg_client, get_sb_program_id, OnDemandError};
+use crate::{get_sb_program_id, OnDemandError};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -71,9 +71,6 @@ pub struct VaultInfo {
 unsafe impl Pod for VaultInfo {}
 unsafe impl Zeroable for VaultInfo {}
 
-cfg_client! {
-    impl_account_deserialize!(QueueAccountData);
-}
 
 impl Discriminator for QueueAccountData {
     const DISCRIMINATOR: [u8; 8] = [217, 194, 55, 127, 184, 83, 138, 1];
@@ -187,33 +184,4 @@ impl QueueAccountData {
         self.oracle_keys[..self.oracle_keys_len as usize].to_vec()
     }
 
-    cfg_client! {
-        pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
-            pubkey: Pubkey,
-        ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
-        }
-
-        pub async fn fetch_oracles(
-            &self,
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
-        ) -> std::result::Result<Vec<(Pubkey, OracleAccountData)>, crate::OnDemandError> {
-            let oracles = &self.oracle_keys[..self.oracle_keys_len as usize];
-            let datas: Vec<_> = client
-                .get_multiple_accounts(&oracles)
-                .await
-                .map_err(|_e| crate::OnDemandError::NetworkError)?
-                .into_iter()
-                .filter_map(|x| x)
-                .map(|x| x.data.clone())
-                .collect::<Vec<_>>()
-                .iter()
-                .map(|x| OracleAccountData::new_from_bytes(x))
-                .filter_map(|x| x.ok())
-                .map(|x| x.clone())
-                .collect();
-            Ok(oracles.iter().cloned().zip(datas).collect())
-        }
-    }
 }

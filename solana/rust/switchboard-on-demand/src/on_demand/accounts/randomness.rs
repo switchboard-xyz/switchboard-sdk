@@ -35,9 +35,6 @@ impl Owner for RandomnessAccountData {
     }
 }
 
-cfg_client! {
-    impl_account_deserialize!(RandomnessAccountData);
-}
 impl RandomnessAccountData {
     pub const fn size() -> usize {
         std::mem::size_of::<Self>() + 8
@@ -72,12 +69,4 @@ impl RandomnessAccountData {
         }))
     }
 
-    cfg_client! {
-        pub async fn fetch_async(
-            client: &solana_client::nonblocking::rpc_client::RpcClient,
-            pubkey: Pubkey,
-        ) -> std::result::Result<Self, crate::OnDemandError> {
-            crate::client::fetch_zerocopy_account_async(client, pubkey).await
-        }
-    }
 }

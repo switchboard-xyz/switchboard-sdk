@@ -4,9 +4,6 @@ pub use error::*;
 pub mod accounts;
 pub use accounts::*;
 
-pub mod instructions;
-pub use instructions::*;
-
 pub mod types;
 use solana_program::pubkey;
 pub use types::*;
