@@ -2,12 +2,13 @@ use std::cell::Ref;
 
 #[cfg(feature = "anchor")]
 use anchor_lang::{
-    account, error, zero_copy, AnchorDeserialize, AnchorSerialize, Discriminator, Owner, ZeroCopy,
+    AnchorDeserialize, AnchorSerialize, Discriminator, Owner, ZeroCopy, prelude::Pubkey,
 };
 use bytemuck;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use solana_program::clock::Clock;
+#[cfg(not(feature = "anchor"))]
 use solana_program::pubkey::Pubkey;
 
 #[cfg(not(feature = "anchor"))]
@@ -22,7 +23,7 @@ pub fn sb_pid() -> Pubkey {
     } else {
         get_sb_program_id("mainnet")
     };
-    pid
+    pid.to_bytes().try_into().unwrap()
 }
 
 #[repr(C)]

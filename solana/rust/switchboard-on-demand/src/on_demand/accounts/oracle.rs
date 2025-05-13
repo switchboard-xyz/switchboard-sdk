@@ -80,7 +80,6 @@ pub struct OracleAccountData {
     _ebuf1: [u8; 1024],
 }
 
-
 impl Discriminator for OracleAccountData {
     const DISCRIMINATOR: [u8; 8] = [128, 30, 16, 241, 170, 73, 55, 54];
 }
@@ -249,5 +248,4 @@ impl OracleAccountData {
     pub fn feed_stats_seed<'a>(feed: &'a [u8], oracle: &'a [u8], bump: &'a [u8]) -> [&'a [u8]; 4] {
         [&ORACLE_FEED_STATS_SEED.as_slice(), feed, oracle, bump]
     }
-
 }

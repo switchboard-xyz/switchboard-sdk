@@ -30,7 +30,8 @@ pub fn get_associated_token_address(
     wallet_address: &Pubkey,
     token_mint_address: &Pubkey,
 ) -> Pubkey {
-    get_associated_token_address_with_program_id(wallet_address, token_mint_address, &spl_token::ID)
+    let spl_pid = Pubkey::new_from_array(spl_token::ID.to_bytes());
+    get_associated_token_address_with_program_id(wallet_address, token_mint_address, &spl_pid)
 }
 
 /// Derives the associated token account address for the given wallet address,

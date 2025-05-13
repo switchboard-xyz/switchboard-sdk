@@ -68,5 +68,4 @@ impl RandomnessAccountData {
             bytemuck::from_bytes(&data[8..std::mem::size_of::<Self>() + 8])
         }))
     }
-
 }

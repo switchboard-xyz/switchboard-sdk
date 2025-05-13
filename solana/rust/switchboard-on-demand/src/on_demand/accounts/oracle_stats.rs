@@ -1,6 +1,5 @@
 #![allow(unused_attributes)]
 use solana_program::pubkey::Pubkey;
-use switchboard_common::cfg_client;
 
 use crate::anchor_traits::*;
 use crate::get_sb_program_id;
@@ -58,4 +57,3 @@ impl Owner for OracleStatsAccountData {
 impl Discriminator for OracleStatsAccountData {
     const DISCRIMINATOR: [u8; 8] = [180, 157, 178, 234, 240, 27, 152, 179];
 }
-

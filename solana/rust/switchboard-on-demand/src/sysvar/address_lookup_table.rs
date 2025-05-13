@@ -22,4 +22,3 @@ pub fn find_lut_of(k: &Pubkey, lut_slot: u64) -> Pubkey {
     // )
     // .0
 }
-

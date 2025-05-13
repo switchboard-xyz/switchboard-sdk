@@ -71,7 +71,6 @@ pub struct VaultInfo {
 unsafe impl Pod for VaultInfo {}
 unsafe impl Zeroable for VaultInfo {}
 
-
 impl Discriminator for QueueAccountData {
     const DISCRIMINATOR: [u8; 8] = [217, 194, 55, 127, 184, 83, 138, 1];
 }
@@ -183,5 +182,4 @@ impl QueueAccountData {
     pub fn oracle_keys(&self) -> Vec<Pubkey> {
         self.oracle_keys[..self.oracle_keys_len as usize].to_vec()
     }
-
 }

@@ -2,9 +2,9 @@ use bytemuck::{Pod, Zeroable};
 use solana_program::pubkey::Pubkey;
 
 use crate::anchor_traits::*;
+use crate::get_sb_program_id;
 #[allow(unused_imports)]
 use crate::impl_account_deserialize;
-use crate::{get_sb_program_id};
 
 const STATE_SEED: &[u8] = b"STATE";
 
@@ -12,7 +12,7 @@ const STATE_SEED: &[u8] = b"STATE";
 pub struct StateEpochInfo {
     pub id: u64,
     pub reserved1: u64,
-    pub slot_end: u64
+    pub slot_end: u64,
 }
 
 #[repr(C)]
@@ -81,5 +81,4 @@ impl State {
         let (pda_key, _) = Pubkey::find_program_address(&[STATE_SEED], &program_id.unwrap_or(pid));
         pda_key
     }
-
 }

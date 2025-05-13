@@ -22,17 +22,18 @@ default = []
 pid_override = []
 devnet = []
 doc_cfg = []
+anchor = ["anchor-lang"]
 
 [dependencies]
+anchor-lang = { version = ">=0.28", optional = true }
 base64 = "0.21.7"
 bincode = { version = "^1" }
 borsh = { version = "0.10.4" }
 bytemuck = "^1"
-libsecp256k1 = "0.7.2"
+libsecp256k1 = { version = "0.7.2", default-features = false }
 rust_decimal = "^1"
 serde = { version = "^1", features = ["derive"] }
 sha2 = "0.10.9"
 solana-program = ">=1.18"
 spl-associated-token-account = { version = ">=2", features = ["no-entrypoint"] }
 spl-token = { version = ">=3", features = ["no-entrypoint"] }
-switchboard-common = { version = "0.11.3", path = "../switchboard-common", features = [] }
