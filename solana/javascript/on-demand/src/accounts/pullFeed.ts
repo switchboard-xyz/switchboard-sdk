@@ -873,21 +873,11 @@ export class PullFeed {
     // Validate that (1) all of the feeds specified exist and (2) all of the feeds are on the same
     // queue. Assuming that these conditions are met, we can map the feeds' data to their configs to
     // request signatures from a gateway.
-    let needFetch = false;
-    for (const feed of feeds) {
-      if (feed.data === null) {
-        needFetch = true;
-        break;
-      }
-    }
-    let feedDatas: (PullFeedAccountData | null)[] = [];
-    if (needFetch) {
-      feedDatas = await PullFeed.loadMany(program, feeds);
-    } else {
-      for (const feed of feeds) {
-        feedDatas.push(feed.data!);
-      }
-    }
+    const needFetch = feeds.some(feed => !feed.data);
+    const feedDatas: (PullFeedAccountData | null)[] = needFetch
+      ? await PullFeed.loadMany(program, feeds)
+      : feeds.map(feed => feed.data);
+
     const queue: web3.PublicKey = feedDatas[0]?.queue ?? web3.PublicKey.default;
     const feedConfigs: FeedRequest[] = [];
     for (let idx = 0; idx < feedDatas.length; idx++) {
