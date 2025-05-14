@@ -96,17 +96,6 @@ where
     }
 }
 
-// ArcSwap
-
-impl<T> ToKeypair for arc_swap::Guard<Arc<T>>
-where
-    T: ToKeypair,
-{
-    fn keypair(&self) -> &Keypair {
-        self.deref().keypair()
-    }
-}
-
 // Tokio RwLock
 
 impl<'a, T> ToKeypair for RwLockReadGuard<'a, T>

@@ -70,10 +70,12 @@ impl ToAccountMetas for OracleSyncLutAccounts {
 cfg_client! {
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
-use jito_restaking_client::programs::JITO_RESTAKING_ID;
-use jito_vault_client::programs::JITO_VAULT_ID;
+use solana_sdk::pubkey;
 use crate::get_sb_program_id;
 use crate::find_lut_signer;
+
+const JITO_VAULT_ID: Pubkey = pubkey!("Vau1t6sLNxnzB7ZDsef8TLbPLfyZMYXH8WTNqUdm9g8");
+const JITO_RESTAKING_ID: Pubkey = pubkey!("RestkWeAVL8fRGgzhfeoqFhsqKRchg6aa1XrcH96z4Q");
 
 impl OracleSyncLut {
     pub async fn build_ix(client: &RpcClient, args: OracleSyncLutArgs) -> Result<Instruction, OnDemandError> {
