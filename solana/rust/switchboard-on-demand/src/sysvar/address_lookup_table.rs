@@ -1,7 +1,7 @@
 use solana_program::address_lookup_table::instruction::derive_lookup_table_address;
 use solana_program::pubkey::Pubkey;
 
-use crate::{ON_DEMAND_DEVNET_PID, ON_DEMAND_MAINNET_PID};
+use crate::{cfg_client, ON_DEMAND_DEVNET_PID, ON_DEMAND_MAINNET_PID};
 
 const LUT_SIGNER_SEED: &[u8] = b"LutSigner";
 
@@ -21,4 +21,24 @@ pub fn find_lut_of(k: &Pubkey, lut_slot: u64) -> Pubkey {
     // &LUT_PROGRAM_ID,
     // )
     // .0
+}
+
+cfg_client! {
+    use crate::OnDemandError;
+    use solana_client::nonblocking::rpc_client::RpcClient;
+    use solana_sdk::address_lookup_table::state::AddressLookupTable;
+    use solana_sdk::address_lookup_table::AddressLookupTableAccount;
+
+    pub async fn fetch(client: &RpcClient, address: &Pubkey) -> Result<AddressLookupTableAccount, OnDemandError> {
+        let account = client.get_account_data(address)
+            .await
+            .map_err(|_| OnDemandError::AddressLookupTableFetchError)?;
+        let lut = AddressLookupTable::deserialize(&account)
+            .map_err(|_| OnDemandError::AddressLookupTableDeserializeError)?;
+        let out = AddressLookupTableAccount {
+            key: address.clone(),
+            addresses: lut.addresses.iter().cloned().collect(),
+        };
+        Ok(out)
+    }
 }

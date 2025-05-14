@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 use serde::ser::StdError;
@@ -70,8 +72,8 @@ impl StdError for OnDemandError {
     }
 }
 #[cfg(not(feature = "anchor"))]
-impl std::fmt::Display for OnDemandError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for OnDemandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:#?}", self)
     }
 }

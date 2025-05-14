@@ -4,6 +4,9 @@ pub use error::*;
 pub mod accounts;
 pub use accounts::*;
 
+pub mod instructions;
+pub use instructions::*;
+
 pub mod types;
 use solana_program::pubkey;
 pub use types::*;
@@ -30,8 +33,7 @@ pub fn get_associated_token_address(
     wallet_address: &Pubkey,
     token_mint_address: &Pubkey,
 ) -> Pubkey {
-    let spl_pid = Pubkey::new_from_array(spl_token::ID.to_bytes());
-    get_associated_token_address_with_program_id(wallet_address, token_mint_address, &spl_pid)
+    get_associated_token_address_with_program_id(wallet_address, token_mint_address, &spl_token::ID)
 }
 
 /// Derives the associated token account address for the given wallet address,

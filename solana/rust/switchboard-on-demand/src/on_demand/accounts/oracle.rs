@@ -7,7 +7,13 @@ use solana_program::sysvar::clock::Clock;
 use crate::anchor_traits::*;
 #[allow(unused_imports)]
 use crate::impl_account_deserialize;
-use crate::{get_sb_program_id, OnDemandError, Quote};
+use crate::{cfg_client, get_sb_program_id, OnDemandError, Quote};
+cfg_client! {
+    use crate::address_lookup_table;
+    use solana_sdk::address_lookup_table::AddressLookupTableAccount;
+    use solana_sdk::address_lookup_table::instruction::derive_lookup_table_address;
+    use crate::find_lut_signer;
+}
 
 pub const ORACLE_FEED_STATS_SEED: &[u8; 15] = b"OracleFeedStats";
 
@@ -78,6 +84,10 @@ pub struct OracleAccountData {
     _ebuf3: [u8; 16],
     _ebuf2: [u8; 64],
     _ebuf1: [u8; 1024],
+}
+
+cfg_client! {
+    impl_account_deserialize!(OracleAccountData);
 }
 
 impl Discriminator for OracleAccountData {
@@ -247,5 +257,45 @@ impl OracleAccountData {
 
     pub fn feed_stats_seed<'a>(feed: &'a [u8], oracle: &'a [u8], bump: &'a [u8]) -> [&'a [u8]; 4] {
         [&ORACLE_FEED_STATS_SEED.as_slice(), feed, oracle, bump]
+    }
+
+    cfg_client! {
+
+        pub async fn fetch_async(
+            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            pubkey: Pubkey,
+        ) -> std::result::Result<Self, crate::OnDemandError> {
+            crate::client::fetch_zerocopy_account_async(client, pubkey).await
+        }
+
+        pub async fn fetch_many(
+            client: &solana_client::nonblocking::rpc_client::RpcClient,
+            oracles: &[Pubkey],
+        ) -> std::result::Result<Vec<OracleAccountData>, crate::OnDemandError> {
+            Ok(client
+                .get_multiple_accounts(&oracles)
+                .await
+                .map_err(|_e| crate::OnDemandError::NetworkError)?
+                .into_iter()
+                .filter_map(|x| x)
+                .map(|x| x.data.clone())
+                .collect::<Vec<_>>()
+                .iter()
+                .map(|x| OracleAccountData::new_from_bytes(x))
+                .filter_map(|x| x.ok())
+                .map(|x| x.clone())
+                .collect())
+        }
+
+        pub async fn fetch_lut(
+            &self,
+            oracle_pubkey: &Pubkey,
+            client: &solana_client::nonblocking::rpc_client::RpcClient,
+        ) -> std::result::Result<AddressLookupTableAccount, crate::OnDemandError> {
+            let lut_slot = self.lut_slot;
+            let lut_signer = find_lut_signer(oracle_pubkey);
+            let lut = derive_lookup_table_address(&lut_signer, lut_slot).0;
+            Ok(address_lookup_table::fetch(client, &lut).await?)
+        }
     }
 }

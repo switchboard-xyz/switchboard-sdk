@@ -31,3 +31,17 @@ pub mod prelude;
 
 pub mod sysvar;
 pub use sysvar::*;
+
+cfg_client! {
+    use solana_sdk::signer::keypair::Keypair;
+    pub type AnchorClient = anchor_client::Client<Arc<Keypair>>;
+    mod client;
+    pub mod clock;
+    pub use clock::*;
+}
+
+cfg_ipfs! {
+    pub mod ipfs {
+        pub use switchboard_common::ipfs::*;
+    }
+}
