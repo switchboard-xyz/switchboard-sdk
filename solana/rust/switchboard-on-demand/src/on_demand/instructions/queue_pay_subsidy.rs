@@ -69,7 +69,7 @@ cfg_client! {
 use solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
 use futures::future::join_all;
-use solana_program::address_lookup_table_account::AddressLookupTableAccount;
+use solana_program::address_lookup_table::AddressLookupTableAccount;
 
 impl QueuePaySubsidy {
     pub async fn build_ix(client: &RpcClient, args: QueuePaySubsidyArgs) -> Result<Instruction, OnDemandError> {

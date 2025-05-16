@@ -4,7 +4,7 @@ use solana_program::pubkey::Pubkey;
 use solana_program::instruction::Instruction;
 use solana_sdk::address_lookup_table::state::AddressLookupTable;
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_program::address_lookup_table_account::AddressLookupTableAccount;
+use solana_program::address_lookup_table::AddressLookupTableAccount;
 use solana_program::hash::Hash;
 use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use solana_program::message::v0;
