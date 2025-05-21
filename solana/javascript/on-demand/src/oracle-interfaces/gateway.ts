@@ -1,4 +1,3 @@
-import type { FeedRequest } from './../accounts/pullFeed.js';
 import { GATEWAY_PING_CACHE } from './../utils/cache.js';
 
 import type { web3 } from '@coral-xyz/anchor-30';
@@ -9,15 +8,18 @@ import type { AxiosInstance } from 'axios';
 import axios from 'axios';
 import bs58 from 'bs58';
 
-// const httpsAgent = new HttpsAgent({
-//   rejectUnauthorized: false, // WARNING: This disables SSL/TLS certificate verification.
-// });
 const TIMEOUT = 10_000;
 
 const axiosClient: () => AxiosInstance = (() => {
   let instance: AxiosInstance;
   return () => (instance ??= axios.create());
 })();
+
+export type FeedRequest = {
+  maxVariance: number;
+  minResponses: number;
+  jobs: IOracleJob[];
+};
 
 /**
  *  The response from the gateway after fetching signatures.

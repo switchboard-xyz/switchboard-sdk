@@ -21,7 +21,7 @@ serde_json = "1.0.135"
 sha2 = "0.10.8"
 libsecp256k1 = "0.7.1"
 log = "0.4"
-solana-sdk = "^1.18,<2"
+solana-sdk = ">=1.18"
 rand_chacha = "0.3.1"
 neon = "1.0.0"
 cached = { version = "0.47.0", features = ["async", "futures", "async-trait"] }
