@@ -491,7 +491,8 @@ impl PullFeed {
             .collect();
 
         // Build the secp256k1 instruction:
-        let secp_ix = Secp256k1InstructionUtils::build_secp256k1_instruction(&secp_signatures, 0).unwrap();
+        let secp_ix = Secp256k1InstructionUtils::build_secp256k1_instruction(&secp_signatures, 0)
+            .map_err(|_|anyhow!("Feed failed to produce signatures: Failed to build secp256k1 instruction"))?;
 
         // Match each median response to its corresponding feed account by comparing feed hashes.
         let feed_pubkeys: Vec<Pubkey> = price_signatures

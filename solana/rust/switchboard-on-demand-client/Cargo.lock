@@ -4673,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-on-demand-client"
-version = "0.4.0-alpha-0.0.3"
+version = "0.4.0-alpha-0.0.5"
 dependencies = [
  "anyhow_ext",
  "arrayref",
