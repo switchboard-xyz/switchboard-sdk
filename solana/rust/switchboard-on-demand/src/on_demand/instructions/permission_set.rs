@@ -1,39 +1,52 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::{AccountMeta, Instruction};
 
 use crate::anchor_traits::*;
-use crate::get_sb_program_id;
 use crate::prelude::*;
+use crate::{get_sb_program_id, solana_program, Pubkey};
 
+/// Switchboard permission types
 #[repr(u32)]
 #[derive(Copy, Clone)]
 pub enum SwitchboardPermission {
-    None = 0 << 0,
+    /// No permissions granted
+    None = 0,
+    /// Permission to send oracle heartbeat
     PermitOracleHeartbeat = 1 << 0,
+    /// Permission to use oracle queue
     PermitOracleQueueUsage = 1 << 1,
 }
 
+/// Attestation permission set instruction
 pub struct AttestationPermissionSet {}
 
+/// Parameters for attestation permission set instruction
 #[derive(Clone, BorshSerialize, Debug)]
 pub struct AttestationPermissionSetParams {
+    /// Permission type to modify
     pub permission: u8,
+    /// Whether to enable or disable the permission
     pub enable: bool,
 }
 
 impl InstructionData for AttestationPermissionSetParams {}
 
+const DISCRIMINATOR: &'static [u8] = &[211, 122, 185, 120, 129, 182, 55, 103];
 impl Discriminator for AttestationPermissionSetParams {
-    const DISCRIMINATOR: [u8; 8] = AttestationPermissionSet::DISCRIMINATOR;
+    const DISCRIMINATOR: &'static [u8] = DISCRIMINATOR;
 }
 
 impl Discriminator for AttestationPermissionSet {
-    const DISCRIMINATOR: [u8; 8] = [211, 122, 185, 120, 129, 182, 55, 103];
+    const DISCRIMINATOR: &'static [u8] = DISCRIMINATOR;
 }
 
+/// Account metas for attestation permission set instruction
 pub struct AttestationPermissionSetAccounts {
+    /// Authority account public key
     pub authority: Pubkey,
+    /// Granter account public key
     pub granter: Pubkey,
+    /// Grantee account public key
     pub grantee: Pubkey,
 }
 impl ToAccountMetas for AttestationPermissionSetAccounts {
@@ -47,6 +60,7 @@ impl ToAccountMetas for AttestationPermissionSetAccounts {
 }
 
 impl AttestationPermissionSet {
+    /// Builds an attestation permission set instruction
     pub fn build_ix(
         granter: Pubkey,
         authority: Pubkey,
@@ -54,7 +68,7 @@ impl AttestationPermissionSet {
         permission: SwitchboardPermission,
         enable: bool,
     ) -> Result<Instruction, OnDemandError> {
-        let pid = if cfg!(feature = "devnet") {
+        let pid = if crate::utils::is_devnet() {
             get_sb_program_id("devnet")
         } else {
             get_sb_program_id("mainnet")

@@ -1,5 +1,5 @@
-import type { BN } from '@coral-xyz/anchor-30';
-import { web3 } from '@coral-xyz/anchor-30';
+import type { BN } from '@coral-xyz/anchor-31';
+import { web3 } from '@coral-xyz/anchor-31';
 
 export function getLutSigner(
   programId: web3.PublicKey,

@@ -3,7 +3,7 @@ import {
   SPL_TOKEN_PROGRAM_ID,
 } from '../constants.js';
 
-import { web3 } from '@coral-xyz/anchor-30';
+import { web3 } from '@coral-xyz/anchor-31';
 
 export class AssociatedTokenProgram {
   private constructor() {}

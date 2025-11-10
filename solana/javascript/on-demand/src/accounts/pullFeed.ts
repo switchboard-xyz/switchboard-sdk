@@ -1,4 +1,3 @@
-import { AnchorUtils } from '../anchor-utils/AnchorUtils.js';
 import {
   SOL_NATIVE_MINT,
   SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID,
@@ -6,15 +5,18 @@ import {
   SPL_SYSVAR_SLOT_HASHES_ID,
   SPL_TOKEN_PROGRAM_ID,
 } from '../constants.js';
-import { InstructionUtils } from '../instruction-utils/InstructionUtils.js';
-import type { Secp256k1Signature } from '../instruction-utils/Secp256k1InstructionUtils.js';
-import { Secp256k1InstructionUtils } from '../instruction-utils/Secp256k1InstructionUtils.js';
+import { InstructionUtils } from '../instruction-utils/instruction-utils.js';
+import {
+  Secp256k1InstructionUtils,
+  type Secp256k1Signature,
+} from '../instruction-utils/secp256k1-instruction-utils.js';
 import type {
   FeedEvalResponse,
+  FeedRequest,
   FetchSignaturesConsensusResponse,
 } from '../oracle-interfaces/gateway.js';
-import { RecentSlotHashes } from '../sysvars/recentSlothashes.js';
 import * as spl from '../utils/index.js';
+import { isMainnetConnection } from '../utils/index.js';
 import { loadLookupTables } from '../utils/index.js';
 import { getLutKey, getLutSigner } from '../utils/lookupTable.js';
 
@@ -22,12 +24,13 @@ import { Oracle } from './oracle.js';
 import { Queue } from './queue.js';
 import { State } from './state.js';
 
-import type { Program } from '@coral-xyz/anchor-30';
-import { BN, BorshAccountsCoder, web3 } from '@coral-xyz/anchor-30';
+import type { Program } from '@coral-xyz/anchor-31';
+import { BN, web3 } from '@coral-xyz/anchor-31';
 import type { IOracleJob } from '@switchboard-xyz/common';
 import {
   Big,
   CrossbarClient,
+  CrossbarNetwork,
   FeedHash,
   NonEmptyArrayUtils,
 } from '@switchboard-xyz/common';
@@ -99,12 +102,6 @@ export class OracleResponse {
   }
 }
 
-export type FeedRequest = {
-  maxVariance: number;
-  minResponses: number;
-  jobs: IOracleJob[];
-};
-
 function padStringWithNullBytes(
   input: string,
   desiredLength: number = 32
@@ -161,10 +158,41 @@ async function checkNeedsInit(
 }
 
 /**
- *  Abstraction around the Switchboard-On-Demand Feed account
+ * PullFeed account management for persistent price feeds
  *
- *  This account is used to store the feed data and the oracle responses
- *  for a given feed.
+ * The PullFeed class manages on-chain feed accounts that store price
+ * history and configuration. While the quote approach is more efficient
+ * for most use cases, feeds are useful when you need:
+ *
+ * - Persistent price history on-chain
+ * - Standardized addresses for multiple consumers
+ * - Price archives and analytics
+ * - Compatibility with programs expecting traditional feeds
+ *
+ * ## Key Features
+ *
+ * - **Price History**: Stores historical price data on-chain
+ * - **Job Management**: Configure data sources via IPFS-stored jobs
+ * - **Update Control**: Fine-grained control over update parameters
+ * - **LUT Integration**: Automatic lookup table management
+ *
+ * @example
+ * ```typescript
+ * // Create a new feed
+ * const [pullFeed, feedKp] = PullFeed.generate(program);
+ * await pullFeed.initIx({
+ *   name: "BTC/USD",
+ *   queue: queuePubkey,
+ *   maxVariance: 1.0,
+ *   minResponses: 3,
+ *   feedHash: jobHash,
+ * });
+ *
+ * // Update the feed
+ * const [updateIx, responses] = await pullFeed.fetchUpdateIx();
+ * ```
+ *
+ * @class PullFeed
  */
 export class PullFeed {
   gatewayUrl: string;
@@ -179,6 +207,7 @@ export class PullFeed {
   data: PullFeedAccountData | null;
   jobs: IOracleJob[] | null;
   lut: web3.AddressLookupTableAccount | null;
+  private network: CrossbarNetwork | null = null; // Cache network detection
 
   /**
    * Constructs a `PullFeed` instance.
@@ -194,6 +223,33 @@ export class PullFeed {
     this.pubkey = new web3.PublicKey(pubkey);
     this.configs = null;
     this.jobs = null;
+  }
+
+  /**
+   * Manually set the network for this feed
+   *
+   * This method allows you to explicitly set the network type, which
+   * will be used by methods that need network-specific configuration.
+   *
+   * @param {CrossbarNetwork} network - The network to use (SolanaMainnet or SolanaDevnet)
+   *
+   * @example
+   * ```typescript
+   * const feed = new PullFeed(program, feedPubkey);
+   * feed.setNetwork(CrossbarNetwork.SolanaDevnet);
+   * ```
+   */
+  setNetwork(network: CrossbarNetwork): void {
+    this.network = network;
+  }
+
+  /**
+   * Get the cached network type
+   *
+   * @returns {CrossbarNetwork | null} The network (SolanaMainnet, SolanaDevnet, or null if not yet determined)
+   */
+  getNetwork(): CrossbarNetwork | null {
+    return this.network;
   }
 
   static generate(program: Program): [PullFeed, web3.Keypair] {
@@ -285,27 +341,6 @@ export class PullFeed {
     return new Queue(this.program, data.queue);
   }
 
-  async fetchGatewayUrl(crossbarClient_?: CrossbarClient): Promise<string> {
-    const crossbarClient = crossbarClient_ ?? CrossbarClient.default();
-
-    // Start parallel tasks
-    const loadConfigsPromise = this.loadConfigs();
-    const preHeatPromise = this.preHeatLuts();
-    const fetchQueuePromise = this.fetchQueue();
-
-    // Wait for all in parallel
-    await Promise.all([loadConfigsPromise, preHeatPromise, fetchQueuePromise]);
-    const queue = await fetchQueuePromise;
-
-    // Fetch gateway and load jobs in parallel
-    const [gw] = await Promise.all([
-      queue.fetchGateway(),
-      this.loadJobs(crossbarClient),
-    ]);
-
-    return gw.gatewayUrl;
-  }
-
   async preHeatFeed(crossbarClient: CrossbarClient = CrossbarClient.default()) {
     const loadConfigsPromise = this.loadConfigs();
     const preHeatPromise = this.preHeatLuts();
@@ -324,6 +359,20 @@ export class PullFeed {
     if (this.jobs) {
       return this.jobs!;
     }
+
+    // Detect and cache network if not already set
+    if (this.network === null) {
+      const isMainnet = await isMainnetConnection(
+        this.program.provider.connection
+      );
+      this.network = isMainnet
+        ? CrossbarNetwork.SolanaMainnet
+        : CrossbarNetwork.SolanaDevnet;
+    }
+
+    // Set the crossbar network based on detected/cached network
+    crossbarClient.setNetwork(this.network);
+
     const configs = await this.loadConfigs();
     const feedHash = Buffer.from(configs.feedHash);
     this.jobs = await crossbarClient
@@ -514,22 +563,51 @@ export class PullFeed {
    * - A number representing the successful responses.
    * - An array containing usable lookup tables.
    */
-  async fetchUpdateIx(
-    params: {
-      gateway: string;
-      // Number of signatures to fetch.
-      numSignatures?: number;
-      jobs?: IOracleJob[];
-      crossbarClient?: CrossbarClient;
-      retries?: number;
-      chain?: string;
-      network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      solanaRpcUrl?: string;
-      recentSlothashes?: Array<[BN, string]>;
-    },
-    debug: boolean = false,
-    payer?: web3.PublicKey
-  ): Promise<
+  /**
+   * Fetches update instructions for this feed
+   *
+   * Retrieves fresh oracle data and creates the instructions to update
+   * the on-chain feed account. This method handles all the complexity
+   * of oracle communication and signature verification.
+   *
+   * @param {Object} params - Update parameters
+   * @param {number} params.numSignatures - Number of oracle signatures (defaults to minSampleSize + 33%)
+   * @param {IOracleJob[]} params.jobs - Optional job overrides
+   * @param {CrossbarClient} params.crossbarClient - Optional Crossbar client
+   * @param {number} params.retries - Number of retry attempts
+   * @param {string} params.chain - Chain identifier
+   * @param {string} params.network - Network (mainnet/devnet)
+   * @param {string} params.solanaRpcUrl - Optional RPC URL override
+   * @param {Record<string, string>} params.variableOverrides - Optional variable overrides for task execution
+   * @param {boolean} debug - Enable debug logging
+   * @param {web3.PublicKey} payer - Optional payer override
+   * @returns {Promise<[instructions, responses, success, luts, logs]>} Update transaction components
+   *
+   * @example
+   * ```typescript
+   * const [pullIx, responses, success, luts] = await pullFeed.fetchUpdateIx({
+   *   gateway: 'https://gateway.switchboard.xyz',
+   *   numSignatures: 3,
+   * });
+   *
+   * if (pullIx) {
+   *   const tx = await asV0Tx({
+   *     connection,
+   *     ixs: pullIx,
+   *     signers: [payer],
+   *     lookupTables: luts,
+   *   });
+   * }
+   * ```
+   */
+  async fetchUpdateIx(params: {
+    // Number of signatures to fetch.
+    numSignatures?: number;
+    jobs?: IOracleJob[];
+    crossbarClient?: CrossbarClient;
+    retries?: number;
+    variableOverrides?: Record<string, string>;
+  }): Promise<
     [
       web3.TransactionInstruction[] | undefined,
       OracleResponse[],
@@ -543,22 +621,13 @@ export class PullFeed {
       params.numSignatures ??
       feedConfigs.minSampleSize + Math.ceil(feedConfigs.minSampleSize / 3);
 
-    return await PullFeed.fetchUpdateIx(
-      /* params= */ {
-        pullFeed: this,
-        gateway: params.gateway,
-        chain: params.chain,
-        network: params.network,
-        numSignatures: numSignatures,
-        crossbarClient: params.crossbarClient,
-        solanaRpcUrl: params.solanaRpcUrl,
-        recentSlothashes: params.recentSlothashes,
-      },
-      debug,
-      payer
-    );
+    return await PullFeed.fetchUpdateIx({
+      pullFeed: this,
+      numSignatures: numSignatures,
+      crossbarClient: params.crossbarClient,
+      variableOverrides: params.variableOverrides,
+    });
   }
-
   /**
    * Loads the feed configurations (if not already cached) for this {@linkcode PullFeed} account from on chain.
    * @returns A promise that resolves to the feed configurations.
@@ -595,7 +664,6 @@ export class PullFeed {
    * @param program - The Anchor program instance
    * @param params - The parameters object
    * @param params.feed - PullFeed address to fetch updates for
-   * @param params.gateway - gateway URL to use for fetching updates
    * @param params.chain - Optional chain identifier (defaults to "solana")
    * @param params.network - Optional network identifier ("mainnet", "mainnet-beta", "testnet", "devnet")
    * @param params.numSignatures - Number of signatures to fetch
@@ -605,27 +673,19 @@ export class PullFeed {
    * @param payer - Optional transaction payer public key
    * @returns Promise resolving to:
    * - instructions: Array of instructions that must be executed in order:
-   *   [0] = secp256k1 program verification instruction
+   *   [0] = Ed25519 program verification instruction
    *   [1] = feed update instruction
    * - oracleResponses: Array of responses from oracles
    * - numSuccesses: Number of successful responses
    * - luts: Array of AddressLookupTableAccount to include
    * - failures: Array of errors that occurred during the fetch
    */
-  static async fetchUpdateIx(
-    params: {
-      pullFeed: PullFeed;
-      gateway: string;
-      chain?: string;
-      network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      numSignatures: number;
-      crossbarClient?: CrossbarClient;
-      solanaRpcUrl?: string;
-      recentSlothashes?: Array<[BN, string]>;
-    },
-    debug?: boolean,
-    payer?: web3.PublicKey
-  ): Promise<
+  static async fetchUpdateIx(params: {
+    pullFeed: PullFeed;
+    numSignatures: number;
+    crossbarClient?: CrossbarClient;
+    variableOverrides?: Record<string, string>;
+  }): Promise<
     [
       web3.TransactionInstruction[] | undefined,
       OracleResponse[],
@@ -634,28 +694,15 @@ export class PullFeed {
       string[],
     ]
   > {
-    const isSolana = getIsSolana(params.chain);
-    const { queue } = await params.pullFeed.loadConfigs(false);
-
-    // SVM chains that arent solana should use the older `fetchUpdateIxSvm` function
-    if (!isSolana) {
-      return this.fetchUpdateIxSvm(params, debug, payer);
-    }
-
     // Fetch the update using the `fetchUpdateManyIx` function
     const [ixns, luts, report] = await PullFeed.fetchUpdateManyIx(
       params.pullFeed.program,
       {
         feeds: [params.pullFeed],
-        chain: params.chain,
-        network: params.network,
-        gateway: params.gateway,
-        recentSlothashes: params.recentSlothashes,
         numSignatures: params.numSignatures,
         crossbarClient: params.crossbarClient,
-        payer: payer,
-      },
-      debug
+        variableOverrides: params.variableOverrides,
+      }
     );
 
     // Generate an OracleResponse for each oracle response in the returned report.
@@ -665,12 +712,7 @@ export class PullFeed {
 
       // The returned oracle_pubkey is a hex string, so we need to convert it to a PublicKey.
       const oraclePubkeyBytes = Buffer.from(x.oracle_pubkey, 'hex');
-      const oraclePubkey = isSolana
-        ? new web3.PublicKey(oraclePubkeyBytes)
-        : web3.PublicKey.findProgramAddressSync(
-            [Buffer.from('Oracle'), queue.toBuffer(), oraclePubkeyBytes],
-            params.pullFeed.program.programId
-          )[0];
+      const oraclePubkey = new web3.PublicKey(oraclePubkeyBytes);
 
       const oracle = new Oracle(params.pullFeed.program, oraclePubkey);
       const error = feedResponse.failure_error;
@@ -697,132 +739,9 @@ export class PullFeed {
     ];
   }
 
-  static async fetchUpdateIxSvm(
-    params: {
-      pullFeed: PullFeed;
-      gateway: string;
-      chain?: string;
-      network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      numSignatures: number;
-      crossbarClient?: CrossbarClient;
-      solanaRpcUrl?: string;
-      recentSlothashes?: Array<[BN, string]>;
-    },
-    debug?: boolean,
-    payer?: web3.PublicKey
-  ): Promise<
-    [
-      web3.TransactionInstruction[] | undefined,
-      OracleResponse[],
-      number,
-      web3.AddressLookupTableAccount[],
-      string[],
-    ]
-  > {
-    const isSolana = getIsSolana(params.chain);
-    const isMainnet = getIsMainnet(params.network);
-
-    // Get the feed data for this feed.
-    const feed = params.pullFeed;
-    const feedData = await feed.loadData();
-
-    // If we are using Solana, we can use the queue that the feed is on. Otherwise, we need to
-    // load the default queue for the specified network.
-    const solanaQueuePubkey = isSolana
-      ? feedData.queue
-      : spl.getDefaultQueueAddress(isMainnet);
-    if (debug) console.log(`Using queue ${solanaQueuePubkey.toBase58()}`);
-
-    const solanaProgram = isSolana
-      ? // If Solana, the feed's program can be used.
-        feed.program
-      : // If not Solana, load a Switchboard Solana program.
-        await (async () => {
-          const cluster: web3.Cluster = isMainnet ? 'mainnet-beta' : 'devnet';
-          const rpc = params.solanaRpcUrl ?? web3.clusterApiUrl(cluster);
-          const connection = new web3.Connection(rpc);
-          return AnchorUtils.loadProgramFromConnection(connection);
-        })();
-
-    const connection = feed.program.provider.connection;
-    const slotHashes =
-      params.recentSlothashes ??
-      (await RecentSlotHashes.fetchLatestNSlothashes(connection, 30));
-
-    const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
-    const jobs = await params.pullFeed.loadJobs(crossbarClient);
-
-    const { responses, failures } = await Queue.fetchSignatures(solanaProgram, {
-      gateway: params.gateway,
-      numSignatures: params.numSignatures,
-      jobs: jobs,
-      queue: solanaQueuePubkey,
-      recentHash: slotHashes[0][1],
-    });
-
-    const oracleResponses = responses.map(resp => {
-      // The returned oracle_pubkey is a hex string, so we need to convert it to a PublicKey.
-      const oraclePubkeyBytes = Buffer.from(resp.oracle_pubkey, 'hex');
-      const oraclePubkey = isSolana
-        ? new web3.PublicKey(oraclePubkeyBytes)
-        : web3.PublicKey.findProgramAddressSync(
-            [
-              Buffer.from('Oracle'),
-              feedData.queue.toBuffer(),
-              oraclePubkeyBytes,
-            ],
-            params.pullFeed.program.programId
-          )[0];
-
-      const oracle = new Oracle(params.pullFeed.program, oraclePubkey);
-      const error = resp.failure_error;
-
-      const oldDP = Big.DP;
-      Big.DP = 40;
-      const value = resp.success_value
-        ? new Big(resp.success_value).div(1e18)
-        : null;
-      Big.DP = oldDP;
-
-      return new OracleResponse(oracle, value, error);
-    });
-    // Find the number of successful responses.
-    const numSuccesses = oracleResponses.filter(({ value }) => value).length;
-    if (!numSuccesses) {
-      throw new Error(
-        `PullFeed.fetchUpdateIx Failure: ${oracleResponses.map(x => x.error)}`
-      );
-    }
-
-    if (debug) console.log('responses', responses);
-
-    const submitSignaturesIx = feed.getSolanaSubmitSignaturesIx({
-      resps: responses,
-      // NOTE: offsets are deprecated.
-      offsets: Array(responses.length).fill(0),
-      slot: slotHashes[0][0],
-      payer,
-      chain: params.chain,
-    });
-
-    const loadLookupTables = spl.createLoadLookupTables();
-    const luts = await loadLookupTables([
-      feed,
-      ...oracleResponses.map(({ oracle }) => oracle),
-    ]);
-
-    return [
-      [submitSignaturesIx],
-      oracleResponses,
-      numSuccesses,
-      luts,
-      failures,
-    ];
-  }
-
   /**
    * Fetches updates for multiple feeds at once into a SINGLE tightly packed instruction.
-   * Returns instructions that must be executed in order, with the secp256k1 verification
+   * Returns instructions that must be executed in order, with the Ed25519 verification
    * instruction placed at the front of the transaction.
    *
    * @param program - The Anchor program instance.
@@ -836,7 +755,7 @@ export class PullFeed {
    * @param debug - A boolean flag to enable or disable debug mode. Defaults to `false`.
    * @returns A promise that resolves to a tuple containing:
    * - An array of transaction instructions that must be executed in order:
-   *   [0] = secp256k1 program verification instruction
+   *   [0] = Ed25519 program verification instruction
    *   [1] = feed update instruction
    * - An array of `AddressLookupTableAccount` to use.
    * - The raw response data.
@@ -845,15 +764,11 @@ export class PullFeed {
     program: Program,
     params: {
       feeds: PullFeed[];
-      chain?: string;
-      network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      gateway: string;
-      recentSlothashes?: Array<[BN, string]>;
       numSignatures: number;
       crossbarClient?: CrossbarClient;
-      payer?: web3.PublicKey;
-    },
-    debug: boolean = false
+      variableOverrides?: Record<string, string>;
+      signatureInstructionIdx?: number; // position of the secp256k1 instruction in the transaction
+    }
   ): Promise<
     [
       web3.TransactionInstruction[],
@@ -861,9 +776,6 @@ export class PullFeed {
       FetchSignaturesConsensusResponse,
     ]
   > {
-    const isSolana = getIsSolana(params.chain);
-    const isMainnet = getIsMainnet(params.network);
-
     const feeds = (() => {
       if (NonEmptyArrayUtils.safeValidate(params.feeds)) return params.feeds;
       throw new Error('Invalid `feeds` array: cannot be empty');
@@ -897,45 +809,62 @@ export class PullFeed {
       });
     }
 
-    // If we are using Solana, we can use the queue that the feeds are on. Otherwise, we need to
-    // load the default queue for the specified network.
-    const solanaQueue = isSolana
-      ? queue
-      : spl.getDefaultQueueAddress(isMainnet);
-    if (debug) console.log(`Using queue ${solanaQueue.toBase58()}`);
-
-    const connection = program.provider.connection;
-    const slotHashes =
-      params.recentSlothashes ??
-      (await RecentSlotHashes.fetchLatestNSlothashes(connection, 30));
     const response = await Queue.fetchSignaturesConsensus(
       /* program= */ program,
       /* params= */ {
-        queue: solanaQueue,
-        gateway: params.gateway,
-        recentHash: slotHashes[0][1],
+        queue: queue,
+        crossbarClient,
         feedConfigs,
         numSignatures: params.numSignatures,
+        // useEd25519 will default to false (secp256k1) for backward compatibility
       }
     );
 
+    // Check if we have any valid oracle responses
+    if (!response.oracle_responses || response.oracle_responses.length === 0) {
+      throw new Error('No oracle responses received from gateway');
+    }
+
+    // Collect error messages from any oracles that failed
+    const oracleErrors: string[] = [];
+    response.oracle_responses.forEach((oracleResponse, idx) => {
+      if (oracleResponse.errors && oracleResponse.errors.length > 0) {
+        oracleErrors.push(
+          `Oracle ${idx} (${oracleResponse.oracle_pubkey}): ${oracleResponse.errors.join('; ')}`
+        );
+      }
+    });
+
     const secpSignatures: Secp256k1Signature[] =
-      response.oracle_responses.map<Secp256k1Signature>(oracleResponse => {
-        return {
-          ethAddress: Buffer.from(oracleResponse.eth_address, 'hex'),
-          signature: Buffer.from(oracleResponse.signature, 'base64'),
-          message: Buffer.from(oracleResponse.checksum, 'base64'),
-          recoveryId: oracleResponse.recovery_id,
-        };
-      });
+      response.oracle_responses.map<Secp256k1Signature>(
+        (oracleResponse, responseIdx) => {
+          return {
+            ethAddress: Buffer.from(oracleResponse.eth_address, 'hex'),
+            signature: Buffer.from(oracleResponse.signature, 'base64'),
+            message: Buffer.from(oracleResponse.checksum, 'base64'),
+            recoveryId: oracleResponse.recovery_id,
+            oracleIdx: responseIdx,
+          };
+        }
+      );
+
+    // Check if we have any valid signatures before calling buildSecp256k1Instruction
+    if (secpSignatures.length === 0) {
+      const errorMessage =
+        oracleErrors.length > 0
+          ? `No valid oracle signatures received. Oracle errors:\n${oracleErrors.join('\n')}`
+          : 'No valid oracle signatures received. All oracles failed to provide signatures.';
+      throw new Error(errorMessage);
+    }
+
     const secpInstruction = Secp256k1InstructionUtils.buildSecp256k1Instruction(
       secpSignatures,
-      0
+      params.signatureInstructionIdx ?? 0
     );
 
     // Prepare the instruction data for the `pullFeedSubmitResponseManySecp` instruction.
     const instructionData = {
-      slot: new BN(slotHashes[0][0]),
+      slot: new BN(response.slot),
       values: response.median_responses.map(({ value }) => new BN(value)),
     };
 
@@ -944,12 +873,12 @@ export class PullFeed {
       queue: queue!,
       programState: State.keyFromSeed(program),
       recentSlothashes: SPL_SYSVAR_SLOT_HASHES_ID,
-      payer: PullFeed.getPayer(program, params.payer),
+      payer: PullFeed.getPayer(program),
       systemProgram: web3.SystemProgram.programId,
       rewardVault: spl.getAssociatedTokenAddressSync(
         SOL_NATIVE_MINT,
         queue,
-        !isSolana // TODO: Review this.
+        false
       ),
       tokenProgram: SPL_TOKEN_PROGRAM_ID,
       tokenMint: SOL_NATIVE_MINT,
@@ -968,9 +897,6 @@ export class PullFeed {
         return feedHashHex === median_response.feed_hash;
       });
       if (feedIndex >= 0) return feeds[feedIndex].pubkey;
-      if (debug) {
-        console.warn(`Feed not found for hash: ${median_response.feed_hash}`);
-      }
       return web3.PublicKey.default;
     });
     // For each oracle response, create the oracle and oracle stats accounts.
@@ -1011,8 +937,8 @@ export class PullFeed {
     // Load the lookup tables for the feeds and oracles.
     const loadLookupTables = spl.createLoadLookupTables();
     const luts = await loadLookupTables([
-      ...feedPubkeys.map(pubkey => new PullFeed(program, pubkey)),
-      ...oraclePubkeys.map(pubkey => new Oracle(program, pubkey)),
+      // ...feedPubkeys.map(pubkey => new PullFeed(program, pubkey)),
+      // ...oraclePubkeys.map(pubkey => new Oracle(program, pubkey)),
     ]);
 
     return [[secpInstruction, submitResponseIx], luts, response];
@@ -1024,11 +950,11 @@ export class PullFeed {
       feeds: PullFeed[];
       chain?: string;
       network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
-      gateway: string;
       recentSlothashes?: Array<[BN, string]>;
       numSignatures: number;
       crossbarClient?: CrossbarClient;
       payer?: web3.PublicKey;
+      variableOverrides?: Record<string, string>;
     },
     debug: boolean = false
   ): Promise<
@@ -1041,11 +967,12 @@ export class PullFeed {
     const isSolana = getIsSolana(params.chain);
     const isMainnet = getIsMainnet(params.network);
 
+    const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
+
     const feeds = (() => {
       if (NonEmptyArrayUtils.safeValidate(params.feeds)) return params.feeds;
       throw new Error('Invalid `feeds` array: cannot be empty');
     })();
-    const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
 
     // Validate that (1) all of the feeds specified exist and (2) all of the feeds are on the same
     // queue. Assuming that these conditions are met, we can map the feeds' data to their configs to
@@ -1075,30 +1002,55 @@ export class PullFeed {
       : spl.getDefaultQueueAddress(isMainnet);
     if (debug) console.log(`Using queue ${solanaQueue.toBase58()}`);
 
-    const connection = program.provider.connection;
-    const slotHashes =
-      params.recentSlothashes ??
-      (await RecentSlotHashes.fetchLatestNSlothashes(connection, 30));
     const response = await Queue.fetchSignaturesConsensus(
       /* program= */ program,
       /* params= */ {
         queue: solanaQueue,
-        gateway: params.gateway,
-        recentHash: slotHashes[0][1],
+        crossbarClient,
         feedConfigs,
         numSignatures: params.numSignatures,
+        variableOverrides: params.variableOverrides,
+        // useEd25519 will default to false (secp256k1) for backward compatibility
       }
     );
 
+    // Check if we have any valid oracle responses
+    if (!response.oracle_responses || response.oracle_responses.length === 0) {
+      throw new Error('No oracle responses received from gateway');
+    }
+
+    // Collect error messages from any oracles that failed
+    const oracleErrors: string[] = [];
+    response.oracle_responses.forEach((oracleResponse, idx) => {
+      if (oracleResponse.errors && oracleResponse.errors.length > 0) {
+        oracleErrors.push(
+          `Oracle ${idx} (${oracleResponse.oracle_pubkey}): ${oracleResponse.errors.join('; ')}`
+        );
+      }
+    });
+
     const secpSignatures: Secp256k1Signature[] =
-      response.oracle_responses.map<Secp256k1Signature>(oracleResponse => {
-        return {
-          ethAddress: Buffer.from(oracleResponse.eth_address, 'hex'),
-          signature: Buffer.from(oracleResponse.signature, 'base64'),
-          message: Buffer.from(oracleResponse.checksum, 'base64'),
-          recoveryId: oracleResponse.recovery_id,
-        };
-      });
+      response.oracle_responses.map<Secp256k1Signature>(
+        (oracleResponse, responseIdx) => {
+          return {
+            ethAddress: Buffer.from(oracleResponse.eth_address, 'hex'),
+            signature: Buffer.from(oracleResponse.signature, 'base64'),
+            message: Buffer.from(oracleResponse.checksum, 'base64'),
+            recoveryId: oracleResponse.recovery_id,
+            oracleIdx: responseIdx,
+          };
+        }
+      );
+
+    // Check if we have any valid signatures before calling buildSecp256k1Instruction
+    if (secpSignatures.length === 0) {
+      const errorMessage =
+        oracleErrors.length > 0
+          ? `No valid oracle signatures received. Oracle errors:\n${oracleErrors.join('\n')}`
+          : 'No valid oracle signatures received. All oracles failed to provide signatures.';
+      throw new Error(errorMessage);
+    }
+
     const secpInstruction = Secp256k1InstructionUtils.buildSecp256k1Instruction(
       secpSignatures,
       0
@@ -1106,7 +1058,7 @@ export class PullFeed {
 
     // Prepare the instruction data for the `pullFeedSubmitResponseManySecp` instruction.
     const instructionData = {
-      slot: new BN(slotHashes[0][0]),
+      slot: new BN(response.slot),
       values: response.median_responses.map(({ value }) => new BN(value)),
     };
 
@@ -1357,43 +1309,6 @@ export class PullFeed {
     return PullFeed.mapFeedSubmissions(data);
   }
 
-  /**
-   *  Loads the feed data for this {@linkcode PullFeed} account from on chain.
-   *
-   *  @param onlyAfter Call will ignore data signed before this slot.
-   *  @returns A promise that resolves to the observed value as it would be
-   *           seen on-chain.
-   */
-  async loadObservedValue(onlyAfter: BN): Promise<{
-    value: Big;
-    slot: BN;
-    oracle: web3.PublicKey;
-  } | null> {
-    const values = await this.loadValues();
-    return toFeedValue(values, onlyAfter);
-  }
-
-  /**
-   * Watches for any on-chain updates to the feed data.
-   *
-   * @param callback The callback to call when the feed data is updated.
-   * @returns A promise that resolves to a subscription ID.
-   */
-  async subscribeToValueChanges(
-    callback: (feed: FeedSubmission[]) => Promise<unknown>
-  ): Promise<number> {
-    const coder = new BorshAccountsCoder(this.program.idl);
-    const subscriptionId = this.program.provider.connection.onAccountChange(
-      this.pubkey,
-      async accountInfo => {
-        const feed = coder.decode('pullFeedAccountData', accountInfo.data);
-        await callback(PullFeed.mapFeedSubmissions(feed));
-      },
-      { commitment: 'processed' }
-    );
-    return subscriptionId;
-  }
-
   static mapFeedSubmissions(data: PullFeedAccountData): FeedSubmission[] {
     const oldDP = Big.DP;
     Big.DP = 40;
@@ -1408,59 +1323,6 @@ export class PullFeed {
     return submissions;
   }
 
-  /**
-   * Watches for any on-chain updates to any data feed.
-   *
-   * @param program The Anchor program instance.
-   * @param callback The callback to call when the feed data is updated.
-   * @returns A promise that resolves to a subscription ID.
-   */
-  static async subscribeToAllUpdates(
-    program: Program,
-    callback: (
-      event: [number, { pubkey: web3.PublicKey; submissions: FeedSubmission[] }]
-    ) => Promise<void>
-  ): Promise<number> {
-    const coder = new BorshAccountsCoder(program.idl);
-    const subscriptionId = program.provider.connection.onProgramAccountChange(
-      program.programId,
-      async (keyedAccountInfo, ctx) => {
-        const { accountId, accountInfo } = keyedAccountInfo;
-        try {
-          const feed = coder.decode('pullFeedAccountData', accountInfo.data);
-          await callback([
-            ctx.slot,
-            {
-              pubkey: accountId,
-              submissions: feed.submissions
-                .filter(x => !x.oracle.equals(web3.PublicKey.default))
-                .map(x => {
-                  Big.DP = 40;
-                  return {
-                    value: new Big(x.value.toString()).div(1e18),
-                    slot: new BN(x.slot.toString()),
-                    oracle: new web3.PublicKey(x.oracle),
-                  };
-                }),
-            },
-          ]);
-        } catch (e) {
-          console.log(`ParseFailure: ${e}`);
-        }
-      },
-      'processed',
-      [
-        {
-          memcmp: {
-            bytes: 'ZoV7s83c7bd',
-            offset: 0,
-          },
-        },
-      ]
-    );
-    return subscriptionId;
-  }
-
   async loadLookupTable(): Promise<web3.AddressLookupTableAccount> {
     // If the lookup table is already loaded, return it
     if (this.lut) return this.lut;
@@ -1470,15 +1332,5 @@ export class PullFeed {
       await this.program.provider.connection.getAddressLookupTable(lutKey);
     this.lut = accnt.value!;
     return this.lut!;
-  }
-
-  async loadHistoricalValuesCompact(
-    data_?: PullFeedAccountData
-  ): Promise<CompactResult[]> {
-    const data = data_ ?? (await this.loadData());
-    const values = data.historicalResults
-      .filter(x => x.slot.gt(new BN(0)))
-      .sort((a, b) => a.slot.cmp(b.slot));
-    return values;
   }
 }

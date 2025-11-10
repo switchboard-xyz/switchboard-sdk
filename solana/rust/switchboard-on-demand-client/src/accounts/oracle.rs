@@ -80,7 +80,7 @@ impl OracleAccountData {
     pub fn stats_key(oracle: &Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[ORACLE_STATS_SEED, &oracle.to_bytes()],
-            &SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
+            &get_switchboard_on_demand_program_id(),
         )
         .0
     }

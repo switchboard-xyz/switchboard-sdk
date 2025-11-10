@@ -3,17 +3,17 @@ use anyhow_ext::anyhow;
 use anyhow_ext::Context;
 use anyhow_ext::Error as AnyhowError;
 use base58::ToBase58;
+use futures::{Stream, StreamExt};
 use hex;
 use reqwest::Client;
-use serde::{Deserialize, Deserializer, Serialize};
+use rust_decimal::Decimal;
 use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use solana_sdk::genesis_config::ClusterType;
 use solana_sdk::pubkey::Pubkey;
 use switchboard_utils::utils::median;
-use rust_decimal::Decimal;
-use futures::{Stream, StreamExt};
-use tokio::time::Duration;
 use tokio::time::interval;
+use tokio::time::Duration;
 use tokio_stream::wrappers::IntervalStream;
 
 #[derive(Serialize, Deserialize)]
@@ -78,7 +78,7 @@ pub struct SuiOracleResult {
     pub oracleId: String,
     #[serde(serialize_with = "bytes_to_hex", deserialize_with = "hex_to_bytes")]
     pub signature: Vec<u8>,
-}   
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SuiFeedConfigs {
@@ -87,7 +87,6 @@ pub struct SuiFeedConfigs {
     pub minResponses: u64,
     pub minSampleSize: u64,
 }
-
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SuiUpdateResponse {
@@ -119,7 +118,6 @@ where
     let s: String = Deserialize::deserialize(deserializer)?;
     hex::decode(&s).map_err(DeError::custom)
 }
-
 
 fn bytes_to_hex<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -289,15 +287,11 @@ impl CrossbarClient {
         // Compute the median result for each response
         for response in responses.iter_mut() {
             // Collect non-None decimals
-            let valid: Vec<Decimal> = response
-                .results
-                .iter()
-                .filter_map(|x| *x)
-                .collect();
+            let valid: Vec<Decimal> = response.results.iter().filter_map(|x| *x).collect();
             response.result = if valid.is_empty() {
                 None
             } else {
-                Some(median(valid).expect("Failed to compute median"))
+                Some(median(valid.as_slice()).expect("Failed to compute median"))
             };
         }
         Ok(responses)
@@ -339,7 +333,7 @@ impl CrossbarClient {
             resp.json().await.context("Failed to parse response")?;
         // Compute the median result for each response
         for response in responses.iter_mut() {
-            response.result = median(response.results.clone()).expect("Failed to compute median");
+            response.result = median(response.results.as_slice()).expect("Failed to compute median");
         }
         Ok(responses)
     }
@@ -361,7 +355,10 @@ impl CrossbarClient {
             return Err(anyhow!("Aggregator addresses are empty"));
         }
         let feeds_param = aggregator_addresses.join(",");
-        let url = format!("{}/updates/sui/{}/{}", self.crossbar_url, network, feeds_param);
+        let url = format!(
+            "{}/updates/sui/{}/{}",
+            self.crossbar_url, network, feeds_param
+        );
         let resp = self
             .client
             .get(&url)
@@ -379,15 +376,23 @@ impl CrossbarClient {
             }
             return Err(anyhow!("Bad status code {}", status.as_u16()));
         }
-        let mut update_response: FetchSuiUpdatesResponse =
-            resp.json().await.context("Failed to parse fetch Sui updates response")?;
-        
+        let mut update_response: FetchSuiUpdatesResponse = resp
+            .json()
+            .await
+            .context("Failed to parse fetch Sui updates response")?;
+
         // If the server did not include aggregator_id or it is empty,
         // and if the number of responses matches the number of aggregator_addresses,
         // we assign the aggregator addresses to the corresponding responses.
         if update_response.responses.len() == aggregator_addresses.len() {
-            for (resp_item, &agg_id) in update_response.responses.iter_mut().zip(aggregator_addresses) {
-                if resp_item.aggregator_id.is_none() || resp_item.aggregator_id.as_ref().unwrap().is_empty() {
+            for (resp_item, &agg_id) in update_response
+                .responses
+                .iter_mut()
+                .zip(aggregator_addresses)
+            {
+                if resp_item.aggregator_id.is_none()
+                    || resp_item.aggregator_id.as_ref().unwrap().is_empty()
+                {
                     resp_item.aggregator_id = Some(agg_id.to_string());
                 }
             }
@@ -412,7 +417,10 @@ impl CrossbarClient {
             return Err(anyhow!("Feed ids are empty"));
         }
         let feeds_param = feed_ids.join(",");
-        let url = format!("{}/simulate/sui/{}/{}", self.crossbar_url, network, feeds_param);
+        let url = format!(
+            "{}/simulate/sui/{}/{}",
+            self.crossbar_url, network, feeds_param
+        );
         let resp = self
             .client
             .get(&url)
@@ -436,7 +444,6 @@ impl CrossbarClient {
         Ok(responses)
     }
 
-
     /// Stream the simulation of feed responses from the crossbar gateway.
     pub fn stream_simulate_feeds<'a>(
         &'a self,
@@ -449,9 +456,7 @@ impl CrossbarClient {
         // For each tick, call the simulate_feeds function.
         interval_stream.then(move |_| {
             let feed_hashes = feed_hashes.clone();
-            async move {
-                self.simulate_feeds(&feed_hashes).await
-            }
+            async move { self.simulate_feeds(&feed_hashes).await }
         })
     }
 
@@ -464,10 +469,8 @@ impl CrossbarClient {
     ) -> impl Stream<Item = Result<Vec<SimulateSolanaFeedsResponse>, AnyhowError>> + 'a {
         let interval_stream = IntervalStream::new(interval(poll_interval));
         interval_stream.then(move |_| {
-            let network = network.clone();
-            async move {
-                self.simulate_solana_feeds(network, feed_pubkeys).await
-            }
+            let network = network;
+            async move { self.simulate_solana_feeds(network, feed_pubkeys).await }
         })
     }
 
@@ -507,20 +510,49 @@ impl CrossbarClient {
             async move { self.fetch_sui_updates(network, &aggregator_addresses).await }
         })
     }
-}
 
+    /// Fetches gateway URLs from the crossbar service for a specific network
+    ///
+    /// # Arguments
+    /// * `network` - The network to fetch gateways for ("mainnet" or "devnet")
+    ///
+    /// # Returns
+    /// * `Result<Vec<String>, AnyhowError>` - A vector of gateway URLs
+    pub async fn fetch_gateways(&self, network: &str) -> Result<Vec<String>, AnyhowError> {
+        let url = format!("{}/gateways?network={}", self.crossbar_url, network);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send fetch gateways request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!("{}: {}", status, resp.text().await.context("Failed to fetch response")?);
+            }
+            return Err(anyhow!("Bad status code {}", status.as_u16()));
+        }
+
+        resp.json().await.context("Failed to parse gateways response")
+    }
+
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::Client;
     use std::str::FromStr;
 
     #[tokio::test]
     async fn test_crossbar_client_default_initialization() {
         let key = Pubkey::from_str("D1MmZ3je8GCjLrTbWXotnZ797k6E56QkdyXyhPXZQocH").unwrap();
         let client = CrossbarClient::default();
-        let resp = client.simulate_solana_feeds(ClusterType::MainnetBeta, &[key]).await.unwrap();
+        let resp = client
+            .simulate_solana_feeds(ClusterType::MainnetBeta, &[key])
+            .await
+            .unwrap();
         println!("{:?}", resp);
     }
 }

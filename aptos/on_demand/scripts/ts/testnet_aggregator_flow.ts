@@ -6,7 +6,7 @@ import {
   axiosAptosClient,
   waitForTx,
   OracleData,
-} from "@switchboard-xyz/aptos-sdk";
+} from '@switchboard-xyz/aptos-sdk';
 import {
   Account,
   Aptos,
@@ -17,14 +17,14 @@ import {
   PrivateKey,
   PrivateKeyVariants,
   APTOS_COIN,
-} from "@aptos-labs/ts-sdk";
-import * as fs from "fs";
-import * as YAML from "yaml";
+} from '@aptos-labs/ts-sdk';
+import * as fs from 'fs';
+import * as YAML from 'yaml';
 
 // ==============================================================================
 // Setup Signer and account
 // ==============================================================================
-const parsedYaml = YAML.parse(fs.readFileSync("./.aptos/config.yaml", "utf8"));
+const parsedYaml = YAML.parse(fs.readFileSync('./.aptos/config.yaml', 'utf8'));
 const privateKey = PrivateKey.formatPrivateKey(
   parsedYaml!.profiles!.default!.private_key!,
   PrivateKeyVariants.Ed25519
@@ -50,48 +50,51 @@ const aptos = new Aptos(config);
 const client = new SwitchboardClient(aptos);
 const { switchboardAddress, oracleQueue } = await client.fetchState();
 
-console.log("Switchboard address:", switchboardAddress);
+console.log('Switchboard address:', switchboardAddress);
 
 const queue = new Queue(client, oracleQueue);
 console.log(await queue.loadOracles());
 
-// ================================================================================================
-// Initialization and Logging
-// ================================================================================================
+// // ================================================================================================
+// // Initialization and Logging
+// // ================================================================================================
 
-const aggregatorInitTx = await Aggregator.initTx(client, signer, {
-  name: "BTC/USD",
-  minSampleSize: 1,
-  maxStalenessSeconds: 60,
-  maxVariance: 1e9,
-  feedHash:
-    "0x558be89a28d20c32f4cd427dd0dc05229ffefb8c17396124d0bbb0e5efd0a04f",
-  minResponses: 1,
-  oracleQueue,
-});
-const res = await aptos.signAndSubmitTransaction({
-  signer: account,
-  transaction: aggregatorInitTx,
-});
-const result = await waitForTx(aptos, res.hash);
+// const aggregatorInitTx = await Aggregator.initTx(client, signer, {
+//   name: "BTC/USD",
+//   minSampleSize: 1,
+//   maxStalenessSeconds: 60,
+//   maxVariance: 1e9,
+//   feedHash:
+//     "0x558be89a28d20c32f4cd427dd0dc05229ffefb8c17396124d0bbb0e5efd0a04f",
+//   minResponses: 1,
+//   oracleQueue,
+// });
+// const res = await aptos.signAndSubmitTransaction({
+//   signer: account,
+//   transaction: aggregatorInitTx,
+// });
+// const result = await waitForTx(aptos, res.hash);
 
-console.log("all feeds", await Aggregator.loadAllFeeds(client));
+// console.log("all feeds", await Aggregator.loadAllFeeds(client));
 
 //================================================================================================
 // Get aggregator id
 //================================================================================================
 
+// const aggregatorAddress =
+//   'address' in result.changes[0] ? result.changes[0].address : undefined;
+
 const aggregatorAddress =
-  "address" in result.changes[0] ? result.changes[0].address : undefined;
+  '0xa21da7d3b181db733bc3959531ba97e6303b9f1645dd90a572971fbe18fe46fd';
 
 if (!aggregatorAddress) {
-  throw new Error("Failed to initialize aggregator");
+  throw new Error('Failed to initialize aggregator');
 }
 
-console.log("Aggregator address:", aggregatorAddress);
+console.log('Aggregator address:', aggregatorAddress);
 
 // wait 2 seconds for the transaction to be finalized
-await new Promise((r) => setTimeout(r, 5000));
+await new Promise(r => setTimeout(r, 5000));
 
 //================================================================================================
 // Fetch the aggregator ix
@@ -99,20 +102,20 @@ await new Promise((r) => setTimeout(r, 5000));
 
 const aggregator = new Aggregator(client, aggregatorAddress);
 
-console.log("aggregator", await aggregator.loadData());
+console.log('aggregator', await aggregator.loadData());
 
 const { responses, updates, updateTx } = await aggregator.fetchUpdate({
   sender: signer,
 });
 
-console.log("Aggregator responses:", responses);
+console.log('Aggregator responses:', responses);
 
 // run the first transaction
 // const tx = transactions[0];
 const tx = updateTx;
 
 if (!tx) {
-  throw new Error("No update found");
+  throw new Error('No update found');
 }
 
 const resTx = await aptos.signAndSubmitTransaction({
@@ -121,4 +124,4 @@ const resTx = await aptos.signAndSubmitTransaction({
 });
 const resultTx = await waitForTx(aptos, resTx.hash);
 
-console.log("Transaction result:", resultTx);
+console.log('Transaction result:', resultTx);

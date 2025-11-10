@@ -1,21 +1,19 @@
 use crate::*;
 
-use solana_program::pubkey::Pubkey;
-use solana_program::instruction::Instruction;
-use solana_sdk::address_lookup_table::state::AddressLookupTable;
-use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_program::address_lookup_table::AddressLookupTableAccount;
-use solana_program::hash::Hash;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
-use solana_program::message::v0;
-use solana_program::message::VersionedMessage;
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::VersionedTransaction;
+use crate::Pubkey;
+use crate::solana_program::instruction::{Instruction, AccountMeta};
+use crate::solana_compat::address_lookup_table::state::AddressLookupTable;
+use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
+use crate::solana_compat::address_lookup_table::AddressLookupTableAccount;
+use crate::solana_program::hash::Hash;
+use crate::solana_compat::compute_budget::ComputeBudgetInstruction;
+use crate::solana_compat::solana_sdk::signer::Signer;
+use crate::solana_compat::solana_sdk::transaction::VersionedTransaction;
 use tokio::sync::RwLockReadGuard;
 use std::ops::Deref;
 use std::sync::Arc;
-use solana_sdk::transaction::Transaction;
-pub use solana_sdk::signer::keypair::Keypair;
+use crate::solana_compat::solana_sdk::transaction::Transaction;
+pub use crate::solana_compat::solana_sdk::signer::keypair::Keypair;
 
 /// A trait for types that can act as signers for transactions.
 pub trait AsSigner: Send + Sync {
@@ -23,7 +21,8 @@ pub trait AsSigner: Send + Sync {
     fn as_signer(&self) -> &dyn Signer;
 
     fn signer_pubkey(&self) -> Pubkey {
-        self.as_signer().pubkey()
+        let anchor_pubkey = self.as_signer().pubkey();
+        Pubkey::new_from_array(anchor_pubkey.to_bytes())
     }
 }
 
@@ -48,7 +47,7 @@ where
 
 impl ToKeypair for Keypair {
     fn keypair(&self) -> &Keypair {
-        &self
+        self
     }
 }
 impl<'a> ToKeypair for &'a Keypair {
@@ -61,27 +60,27 @@ impl<'a> ToKeypair for &'a Keypair {
 
 impl ToKeypair for Arc<Keypair> {
     fn keypair(&self) -> &Keypair {
-        &self
+        self.as_ref()
     }
 }
-impl<'a> AsSigner for Arc<&'a Keypair> {
+impl AsSigner for Arc<&Keypair> {
     fn as_signer(&self) -> &dyn Signer {
         *self.as_ref()
     }
 }
-impl<'a> ToKeypair for &'a Arc<Keypair> {
+impl ToKeypair for &Arc<Keypair> {
     fn keypair(&self) -> &Keypair {
-        &self
+        self.as_ref()
     }
 }
 impl ToKeypair for Arc<Arc<Keypair>> {
     fn keypair(&self) -> &Keypair {
-        &self.as_ref()
+        self
     }
 }
 impl ToKeypair for Arc<Arc<Arc<Keypair>>> {
     fn keypair(&self) -> &Keypair {
-        &self.as_ref().as_ref()
+        self
     }
 }
 
@@ -138,8 +137,8 @@ impl<'a> AsSigner for &Arc<RwLockReadGuard<'a, Keypair>> {
 /// Creating a new transaction object with a payer:
 ///
 /// ```rust
-/// use solana_sdk::pubkey::Pubkey;
-/// use solana_sdk::instruction::Instruction;
+/// use crate::solana_compat::solana_sdk::pubkey::Pubkey;
+/// use crate::solana_compat::solana_sdk::instruction::Instruction;
 /// use std::sync::Arc;
 ///
 /// let payer = Pubkey::new_unique();
@@ -149,8 +148,8 @@ impl<'a> AsSigner for &Arc<RwLockReadGuard<'a, Keypair>> {
 /// Adding an instruction to the transaction:
 ///
 /// ```rust
-/// use solana_sdk::pubkey::Pubkey;
-/// use solana_sdk::instruction::Instruction;
+/// use crate::solana_compat::solana_sdk::pubkey::Pubkey;
+/// use crate::solana_compat::solana_sdk::instruction::Instruction;
 /// use std::sync::Arc;
 ///
 /// let payer = Pubkey::new_unique();
@@ -162,8 +161,8 @@ impl<'a> AsSigner for &Arc<RwLockReadGuard<'a, Keypair>> {
 /// Converting the transaction object to a legacy transaction:
 ///
 /// ```rust
-/// use solana_sdk::pubkey::Pubkey;
-/// use solana_sdk::instruction::Instruction;
+/// use crate::solana_compat::solana_sdk::pubkey::Pubkey;
+/// use crate::solana_compat::solana_sdk::instruction::Instruction;
 /// use std::sync::Arc;
 ///
 /// let payer = Pubkey::new_unique();
@@ -192,7 +191,7 @@ impl TransactionBuilder {
     }
     pub fn new_with_payer(payer: Arc<dyn AsSigner>) -> Self {
         Self {
-            payer: payer.as_signer().pubkey(),
+            payer: payer.signer_pubkey(),
             signers: vec![Arc::clone(&payer)],
             ..Default::default()
         }
@@ -210,7 +209,7 @@ impl TransactionBuilder {
         ixs: impl IntoIterator<Item = Instruction>,
     ) -> Self {
         Self {
-            payer: payer.as_signer().pubkey(),
+            payer: payer.signer_pubkey(),
             signers: vec![Arc::clone(&payer)],
             ixs: ixs.into_iter().collect::<Vec<Instruction>>(),
             ..Default::default()
@@ -233,18 +232,16 @@ impl TransactionBuilder {
     pub fn has_signer(&self, signer: Pubkey) -> bool {
         self.signers
             .iter()
-            .find(|s| s.as_signer().pubkey() == signer)
-            .is_some()
+            .any(|s| s.as_signer().pubkey().to_bytes() == signer.to_bytes())
     }
     pub fn has_payer(&self) -> bool {
         self.has_signer(self.payer)
     }
     pub fn add_signer(mut self, signer: Arc<dyn AsSigner>) -> TransactionBuilder {
         let signer_key = signer.as_signer().pubkey();
-        if let None = self
+        if !self
             .signers
-            .iter()
-            .find(|s| s.as_signer().pubkey() == signer_key)
+            .iter().any(|s| s.as_signer().pubkey() == signer_key)
         {
             self.signers.push(Arc::clone(&signer));
         }
@@ -254,10 +251,9 @@ impl TransactionBuilder {
     pub fn add_signers(mut self, signers: Vec<Arc<dyn AsSigner>>) -> TransactionBuilder {
         for signer in signers {
             let signer_key = signer.as_signer().pubkey();
-            if let None = self
+            if !self
                 .signers
-                .iter()
-                .find(|s| s.as_signer().pubkey() == signer_key)
+                .iter().any(|s| s.as_signer().pubkey() == signer_key)
             {
                 self.signers.push(Arc::clone(&signer));
             }
@@ -283,10 +279,10 @@ impl TransactionBuilder {
     }
     pub fn add_address_lookup_accounts(
         mut self,
-        mut address_lookup_tables: &mut Vec<AddressLookupTableAccount>,
+        address_lookup_tables: &mut Vec<AddressLookupTableAccount>,
     ) -> Self {
         self.address_lookup_tables
-            .append(&mut address_lookup_tables);
+            .append(address_lookup_tables);
         self
     }
     pub async fn add_address_lookup_table(
@@ -346,7 +342,7 @@ impl TransactionBuilder {
 
             for signer in &self.signers {
                 let signer_key = signer.as_signer().pubkey();
-                if signer_key == *required_signer {
+                if signer_key.to_bytes() == required_signer.to_bytes() {
                     found = true;
                     signers.push(signer.as_signer());
                     break;
@@ -365,7 +361,7 @@ impl TransactionBuilder {
     ) -> Result<Vec<&'a dyn Signer>, OnDemandError> {
         let payer_signer = payer.as_signer();
 
-        if payer_signer.pubkey() != self.payer {
+        if payer_signer.pubkey().to_bytes() != self.payer.to_bytes() {
             return Err(OnDemandError::SolanaPayerMismatch);
         }
 
@@ -380,7 +376,7 @@ impl TransactionBuilder {
 
             for signer in self.signers.iter() {
                 let signer_key = signer.as_signer().pubkey();
-                if signer_key == *required_signer {
+                if signer_key.to_bytes() == required_signer.to_bytes() {
                     found = true;
                     signers.push(signer.as_signer());
                     break;
@@ -394,7 +390,7 @@ impl TransactionBuilder {
         Ok(signers)
     }
     pub fn ixs(&self) -> Result<Vec<Instruction>, OnDemandError> {
-        if self.ixs.len() == 0 {
+        if self.ixs.is_empty() {
             return Err(OnDemandError::SolanaInstructionsEmpty);
         }
 
@@ -402,7 +398,7 @@ impl TransactionBuilder {
 
         if let Some(compute_units) = self.compute_units {
             pre_ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(
-                std::cmp::max(std::cmp::min(compute_units, 1_400_000), 200_000),
+                compute_units.clamp(200_000, 1_400_000),
             ));
         }
         // want this first so we unshift last
@@ -412,7 +408,20 @@ impl TransactionBuilder {
             ));
         }
 
-        let ixs = vec![pre_ixs, self.ixs.clone()].concat();
+        // Convert pre_ixs to compatible type
+        let converted_pre_ixs: Vec<Instruction> = pre_ixs.iter().map(|ix| {
+            Instruction {
+                program_id: ix.program_id.to_bytes().into(),
+                accounts: ix.accounts.iter().map(|acc| AccountMeta {
+                    pubkey: acc.pubkey.to_bytes().into(),
+                    is_signer: acc.is_signer,
+                    is_writable: acc.is_writable,
+                }).collect(),
+                data: ix.data.clone(),
+            }
+        }).collect();
+
+        let ixs = [converted_pre_ixs, self.ixs.clone()].concat();
 
         if ixs.len() > 10 {
             return Err(OnDemandError::SolanaInstructionOverflow);
@@ -426,8 +435,23 @@ impl TransactionBuilder {
         signers: Vec<&dyn Signer>,
         recent_blockhash: Hash,
     ) -> Result<Transaction, OnDemandError> {
-        let mut tx = Transaction::new_with_payer(&ixs, Some(&payer));
-        tx.try_sign(&signers, recent_blockhash).map_err(|_| OnDemandError::SolanaSignError)?;
+        // Convert to anchor-client types
+        let converted_ixs: Vec<crate::solana_compat::solana_sdk::instruction::Instruction> = ixs.iter().map(|ix| {
+            crate::solana_compat::solana_sdk::instruction::Instruction {
+                program_id: ix.program_id.to_bytes().into(),
+                accounts: ix.accounts.iter().map(|acc| crate::solana_compat::solana_sdk::instruction::AccountMeta {
+                    pubkey: acc.pubkey.to_bytes().into(),
+                    is_signer: acc.is_signer,
+                    is_writable: acc.is_writable,
+                }).collect(),
+                data: ix.data.clone(),
+            }
+        }).collect();
+        let converted_payer: crate::solana_compat::solana_sdk::pubkey::Pubkey = payer.to_bytes().into();
+        let converted_blockhash: crate::solana_compat::solana_sdk::hash::Hash = recent_blockhash.to_bytes().into();
+
+        let mut tx = Transaction::new_with_payer(&converted_ixs, Some(&converted_payer));
+        tx.try_sign(&signers, converted_blockhash).map_err(|_| OnDemandError::SolanaSignError)?;
         Ok(tx)
     }
     pub fn to_legacy_tx(&self) -> Result<Transaction, OnDemandError> {
@@ -446,7 +470,7 @@ impl TransactionBuilder {
         &self,
         payer: T,
     ) -> Result<Transaction, OnDemandError> {
-        if payer.as_signer().pubkey() != self.payer {
+        if payer.as_signer().pubkey().to_bytes() != self.payer.to_bytes() {
             return Err(OnDemandError::SolanaPayerMismatch);
         }
 
@@ -462,7 +486,7 @@ impl TransactionBuilder {
         payer: T,
         recent_blockhash: Option<Hash>,
     ) -> Result<Transaction, OnDemandError> {
-        if payer.as_signer().pubkey() != self.payer {
+        if payer.as_signer().pubkey().to_bytes() != self.payer.to_bytes() {
             return Err(OnDemandError::SolanaPayerMismatch);
         }
 
@@ -490,14 +514,15 @@ impl TransactionBuilder {
         rpc: &RpcClient,
         address_lookup_table_pubkey: Pubkey,
     ) -> Result<AddressLookupTableAccount, OnDemandError> {
+        let converted_pubkey: crate::solana_compat::solana_sdk::pubkey::Pubkey = address_lookup_table_pubkey.to_bytes().into();
         let account = rpc
-            .get_account(&address_lookup_table_pubkey)
+            .get_account(&converted_pubkey)
             .await
             .map_err(|_e| OnDemandError::NetworkError)?;
         let address_lookup_table =
             AddressLookupTable::deserialize(&account.data).map_err(|_| OnDemandError::AccountDeserializeError)?;
         let address_lookup_table_account = AddressLookupTableAccount {
-            key: address_lookup_table_pubkey,
+            key: address_lookup_table_pubkey.to_bytes().into(),
             addresses: address_lookup_table.addresses.to_vec(),
         };
         Ok(address_lookup_table_account)
@@ -511,8 +536,9 @@ impl TransactionBuilder {
             if address_lookup_pubkeys.is_empty() {
                 vec![]
             } else {
+                let converted_pubkeys: Vec<crate::solana_compat::solana_sdk::pubkey::Pubkey> = address_lookup_pubkeys.iter().map(|pk| pk.to_bytes().into()).collect();
                 let accounts = rpc
-                    .get_multiple_accounts(&address_lookup_pubkeys)
+                    .get_multiple_accounts(&converted_pubkeys)
                     .await
                     .map_err(|_| OnDemandError::NetworkError)?;
 
@@ -522,7 +548,7 @@ impl TransactionBuilder {
                     let address_lookup_table = AddressLookupTable::deserialize(&account.data)
                         .map_err(|_| OnDemandError::AccountDeserializeError)?;
                     let address_lookup_table_account = AddressLookupTableAccount {
-                        key: address_lookup_pubkeys[i],
+                        key: address_lookup_pubkeys[i].to_bytes().into(),
                         addresses: address_lookup_table.addresses.to_vec(),
                     };
                     address_lookup_accounts.push(address_lookup_table_account);
@@ -541,11 +567,35 @@ impl TransactionBuilder {
         address_lookup_accounts: Vec<AddressLookupTableAccount>,
         recent_blockhash: Hash,
     ) -> Result<VersionedTransaction, OnDemandError> {
-        let v0_message =
-            v0::Message::try_compile(&payer, &ixs, &address_lookup_accounts, recent_blockhash)
-                .unwrap();
+        // Convert types directly for solana_sdk compatibility
+        let converted_payer: crate::solana_compat::solana_sdk::pubkey::Pubkey = payer.to_bytes().into();
+        let converted_ixs: Vec<crate::solana_compat::solana_sdk::instruction::Instruction> = ixs.iter().map(|ix| {
+            crate::solana_compat::solana_sdk::instruction::Instruction {
+                program_id: ix.program_id.to_bytes().into(),
+                accounts: ix.accounts.iter().map(|acc| crate::solana_compat::solana_sdk::instruction::AccountMeta {
+                    pubkey: acc.pubkey.to_bytes().into(),
+                    is_signer: acc.is_signer,
+                    is_writable: acc.is_writable,
+                }).collect(),
+                data: ix.data.clone(),
+            }
+        }).collect();
+        let converted_lookup_accounts: Vec<crate::solana_compat::AddressLookupTableAccount> = address_lookup_accounts.iter().map(|lut| {
+            crate::solana_compat::AddressLookupTableAccount {
+                key: lut.key.to_bytes().into(),
+                addresses: lut.addresses.iter().map(|addr| addr.to_bytes().into()).collect(),
+            }
+        }).collect();
+        let converted_blockhash: crate::solana_compat::solana_sdk::hash::Hash = crate::solana_compat::solana_sdk::hash::Hash::new_from_array(recent_blockhash.to_bytes());
 
-        let v0_tx = VersionedTransaction::try_new(VersionedMessage::V0(v0_message), &signers)
+        let v0_message = crate::solana_compat::solana_sdk::message::v0::Message::try_compile(
+            &converted_payer,
+            &converted_ixs,
+            &converted_lookup_accounts,
+            converted_blockhash
+        ).unwrap();
+
+        let v0_tx = VersionedTransaction::try_new(crate::solana_compat::solana_sdk::message::VersionedMessage::V0(v0_message), &signers)
             .unwrap();
 
         Ok(v0_tx)
@@ -565,7 +615,7 @@ impl TransactionBuilder {
         &self,
         payer: T,
     ) -> Result<VersionedTransaction, OnDemandError> {
-        if payer.as_signer().pubkey() != self.payer {
+        if payer.as_signer().pubkey().to_bytes() != self.payer.to_bytes() {
             return Err(OnDemandError::SolanaPayerMismatch);
         }
 
@@ -576,7 +626,6 @@ impl TransactionBuilder {
             self.address_lookup_tables.clone(),
             self.recent_blockhash.unwrap_or_default(),
         )
-        .into()
     }
 }
 
@@ -639,8 +688,8 @@ impl TryFrom<TransactionBuilder> for VersionedTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use solana_sdk::signer::keypair::Keypair;
+    use ::solana_program::instruction::AccountMeta;
+    use crate::solana_compat::solana_sdk::signer::keypair::Keypair;
     use tokio::sync::{OnceCell, RwLock};
 
     // #[test]
@@ -649,7 +698,7 @@ mod tests {
         // let payer = Arc::new(Keypair::new());
         // let missing_signer = Arc::new(Keypair::new());
 //
-        // let ixn = Instruction::new_with_borsh(
+        // let ixn = Instruction::new_with_bytes(
             // program_id,
             // &vec![1u8, 2u8, 3u8, 4u8],
             // vec![
@@ -701,13 +750,14 @@ mod tests {
     fn test_add_compute_budget_ixs() {
         let payer = Arc::new(Keypair::new());
         let payer_pubkey = payer.pubkey();
+        let payer_pubkey_converted = ::solana_program::pubkey::Pubkey::new_from_array(payer_pubkey.to_bytes());
 
         let tx = TransactionBuilder::new_with_payer(payer.clone())
-            .add_ix(Instruction::new_with_borsh(
+            .add_ix(Instruction::new_with_bytes(
                 Pubkey::new_unique(),
                 &vec![1u8, 2u8, 3u8, 4u8],
                 vec![
-                    AccountMeta::new(payer_pubkey, true),
+                    AccountMeta::new(payer_pubkey_converted, true),
                     AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 ],
             ))
@@ -715,11 +765,11 @@ mod tests {
         assert_eq!(tx.ixs().unwrap_or_default().len(), 2);
 
         let tx = TransactionBuilder::new_with_payer(payer.clone())
-            .add_ix(Instruction::new_with_borsh(
+            .add_ix(Instruction::new_with_bytes(
                 Pubkey::new_unique(),
                 &vec![1u8, 2u8, 3u8, 4u8],
                 vec![
-                    AccountMeta::new(payer_pubkey, true),
+                    AccountMeta::new(payer_pubkey_converted, true),
                     AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 ],
             ))
@@ -727,11 +777,11 @@ mod tests {
         assert_eq!(tx.ixs().unwrap_or_default().len(), 2);
 
         let tx = TransactionBuilder::new_with_payer(payer.clone())
-            .add_ix(Instruction::new_with_borsh(
+            .add_ix(Instruction::new_with_bytes(
                 Pubkey::new_unique(),
                 &vec![1u8, 2u8, 3u8, 4u8],
                 vec![
-                    AccountMeta::new(payer_pubkey, true),
+                    AccountMeta::new(payer_pubkey_converted, true),
                     AccountMeta::new_readonly(Pubkey::new_unique(), false),
                 ],
             ))
@@ -745,7 +795,7 @@ mod tests {
         let payer = Arc::new(Keypair::new());
 
         let tx = TransactionBuilder::new_with_payer(payer.clone())
-            .add_ix(Instruction::new_with_borsh(
+            .add_ix(Instruction::new_with_bytes(
                 Pubkey::new_unique(),
                 &vec![1u8, 2u8, 3u8, 4u8],
                 vec![
@@ -755,7 +805,7 @@ mod tests {
             ))
             .set_compute_units(750_000);
 
-        assert_eq!(tx.payer, payer.pubkey());
+        assert_eq!(tx.payer.to_bytes(), payer.pubkey().to_bytes());
     }
 
     pub static PAYER_KEYPAIR: OnceCell<Arc<RwLock<Arc<Keypair>>>> = OnceCell::const_new();
@@ -772,7 +822,7 @@ mod tests {
         let payer_arc = payer.read().await.clone();
 
         let tx = TransactionBuilder::new_with_payer(payer_arc.clone())
-            .add_ix(Instruction::new_with_borsh(
+            .add_ix(Instruction::new_with_bytes(
                 Pubkey::new_unique(),
                 &vec![1u8, 2u8, 3u8, 4u8],
                 vec![
@@ -782,7 +832,7 @@ mod tests {
             ))
             .set_compute_units(750_000);
 
-        assert_eq!(tx.payer, payer_arc.pubkey());
+        assert_eq!(tx.payer.to_bytes(), payer_arc.pubkey().to_bytes());
     }
 
     #[tokio::test]
@@ -791,7 +841,7 @@ mod tests {
         let payer_arc = payer.load();
 
         let tx = TransactionBuilder::new_with_payer(payer_arc.clone())
-            .add_ix(Instruction::new_with_borsh(
+            .add_ix(Instruction::new_with_bytes(
                 Pubkey::new_unique(),
                 &vec![1u8, 2u8, 3u8, 4u8],
                 vec![
@@ -801,6 +851,6 @@ mod tests {
             ))
             .set_compute_units(750_000);
 
-        assert_eq!(tx.payer, payer_arc.pubkey());
+        assert_eq!(tx.payer.to_bytes(), payer_arc.pubkey().to_bytes());
     }
 }

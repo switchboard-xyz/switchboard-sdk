@@ -4,34 +4,56 @@
 macro_rules! cfg_client {
     ($($item:item)*) => {
         $(
-            #[cfg(all(feature = "client"))]
+            #[cfg(any(feature = "client", feature = "client-v2", feature = "client-v3"))]
             $item
         )*
     };
 }
 
-/// Macro used to include code if the feature 'secrets' is enabled.
-/// This is intended to be used for code that is primarily for off-chain Switchboard Secrets.
 #[macro_export]
-macro_rules! cfg_secrets {
+macro_rules! cfg_anchor {
     ($($item:item)*) => {
         $(
-            #[cfg(all(feature = "secrets"))]
+            #[cfg(any(feature = "anchor"))]
             $item
         )*
     };
 }
 
-/// Macro used to include IPFS code if the feature 'ipfs' is enabled.
+/// Helper macro to conditionally convert instruction types when both solana-v2 and client features are enabled
 #[macro_export]
-macro_rules! cfg_ipfs {
-    ($($item:item)*) => {
-        $(
-            #[cfg(all(feature = "ipfs"))]
-            $item
-        )*
-    };
+macro_rules! build_ix_compat {
+    ($program_id:expr, $accounts:expr, $params:expr) => {{
+        $crate::utils::build_ix($program_id, $accounts, $params)
+    }};
 }
+
+// /// Helper macro to wrap the final instruction return with type conversion if needed
+// /// When both solana-v2 and client features are enabled, code inside cfg_client! blocks
+// /// uses anchor's v3 types, but must return v2 types for compatibility
+// ///
+// /// SAFETY: This uses unsafe transmute internally, which is safe because all Solana
+// /// Instruction types (v2, v3, anchor) have identical memory layout
+// #[macro_export]
+// macro_rules! return_ix_compat {
+    // ($ix:expr) => {{
+        // #[cfg(all(feature = "solana-v2", feature = "client"))]
+        // {
+            // // SAFETY: All Solana Instruction types have identical memory layout
+            // // (program_id: Pubkey, accounts: Vec<AccountMeta>, data: Vec<u8>)
+            // Ok(unsafe {
+                // $crate::instruction_compat::mixed_version::convert_any_instruction_to_compat_unsafe(
+                    // $ix,
+                // )
+            // }
+            // .to_v2())
+        // }
+        // #[cfg(not(all(feature = "solana-v2", feature = "client")))]
+        // {
+            // Ok($ix)
+        // }
+    // }};
+// }
 
 /// Retry a given expression a specified number of times with a delay between each attempt.
 ///
@@ -113,14 +135,16 @@ macro_rules! blocking_retry {
     }};
 }
 
+/// Implements AccountDeserialize trait for Anchor compatibility
+/// Only available when anchor-lang is enabled (client or anchor features)
+#[cfg(feature = "anchor-lang")]
 #[macro_export]
 macro_rules! impl_account_deserialize {
     ($struct_name:ident) => {
-        use anchor_client;
-        use anchor_lang::prelude::{Error, ErrorCode};
-
-        impl anchor_client::anchor_lang::AccountDeserialize for $struct_name {
-            fn try_deserialize(buf: &mut &[u8]) -> Result<Self, Error> {
+        impl anchor_lang::AccountDeserialize for $struct_name {
+            fn try_deserialize(buf: &mut &[u8]) -> Result<Self, anchor_lang::prelude::Error> {
+                use anchor_lang::prelude::ErrorCode;
+                use $crate::anchor_traits::Discriminator;
                 if buf.len() < $struct_name::discriminator().len() {
                     return Err(ErrorCode::AccountDiscriminatorMismatch.into());
                 }
@@ -128,10 +152,14 @@ macro_rules! impl_account_deserialize {
                 if $struct_name::discriminator() != given_disc {
                     return Err(ErrorCode::AccountDiscriminatorMismatch.into());
                 }
-                Self::try_deserialize_unchecked(buf)
+                if let Ok(ret) = Self::try_deserialize_unchecked(buf) {
+                    return Ok(ret);
+                }
+                Err(ErrorCode::AccountDidNotDeserialize.into())
             }
 
-            fn try_deserialize_unchecked(buf: &mut &[u8]) -> Result<Self, Error> {
+            fn try_deserialize_unchecked(buf: &mut &[u8]) -> Result<Self, anchor_lang::prelude::Error> {
+                use anchor_lang::prelude::ErrorCode;
                 let data: &[u8] = &buf[8..];
                 bytemuck::try_from_bytes(data)
                     .map(|r: &Self| *r)
@@ -139,4 +167,11 @@ macro_rules! impl_account_deserialize {
             }
         }
     };
+}
+
+/// No-op version when anchor-lang is not enabled
+#[cfg(not(feature = "anchor-lang"))]
+#[macro_export]
+macro_rules! impl_account_deserialize {
+    ($struct_name:ident) => {};
 }

@@ -1,23 +1,30 @@
-use borsh::ser::BorshSerialize;
+use borsh::BorshSerialize;
 use solana_program::instruction::AccountMeta;
-use solana_program::pubkey::Pubkey;
+
+use crate::{solana_program, Pubkey};
 
 /// Traits pulled out of anchor-lang library to remove dependency conflicts
 /// for users.
-
 pub trait Discriminator {
-    const DISCRIMINATOR: [u8; 8];
-    fn discriminator() -> [u8; 8] {
+    /// The 8-byte discriminator used to identify the account or instruction type
+    const DISCRIMINATOR: &'static [u8];
+
+    /// Returns the discriminator for this type
+    fn discriminator() -> &'static [u8] {
         Self::DISCRIMINATOR
     }
 }
 
+/// Trait for types that have an owner program
 pub trait Owner {
+    /// Returns the program ID that owns this account type
     fn owner() -> Pubkey;
 }
 
+/// Trait marker for zero-copy deserialization
 pub trait ZeroCopy {}
 
+/// Trait for converting types to Solana account metas
 pub trait ToAccountMetas {
     /// `is_signer` is given as an optional override for the signer meta field.
     /// This covers the edge case when a program-derived-address needs to relay
@@ -32,9 +39,10 @@ pub trait ToAccountMetas {
 /// `args` is a borsh serialized struct of named fields for each argument given
 /// to an instruction.
 pub trait InstructionData: Discriminator + BorshSerialize {
+    /// Serializes the instruction data with discriminator prefix
     fn data(&self) -> Vec<u8> {
-        let mut d = Self::discriminator().to_vec();
-        d.append(&mut self.try_to_vec().expect("Should always serialize"));
+        let mut d = Self::DISCRIMINATOR.to_vec();
+        d.append(&mut borsh::to_vec(self).expect("Should always serialize"));
         d
     }
 }

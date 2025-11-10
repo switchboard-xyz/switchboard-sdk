@@ -1,4 +1,4 @@
-import { web3 } from '@coral-xyz/anchor-30';
+import { web3 } from '@coral-xyz/anchor-31';
 import { NonEmptyArrayUtils } from '@switchboard-xyz/common';
 
 // The serialized size of a secp256k1 signature
@@ -13,6 +13,7 @@ export type Secp256k1Signature = {
   signature: Buffer;
   message: Buffer;
   recoveryId: number;
+  oracleIdx: number; // Index of the oracle in the queue
 };
 
 export class Secp256k1InstructionUtils {
@@ -25,21 +26,44 @@ export class Secp256k1InstructionUtils {
     signatures: Secp256k1Signature[],
     instructionIndex: number
   ): web3.TransactionInstruction {
+    // Add null/undefined check before array validation
+    if (!signatures || !Array.isArray(signatures)) {
+      throw new Error('Invalid `signatures` parameter: must be an array');
+    }
+
     // Ensure that the `instructionIndex` is both a valid finite number and non-negative
     if (!Number.isFinite(instructionIndex) || instructionIndex < 0) {
       throw new Error('Invalid instruction index');
     } else if (!NonEmptyArrayUtils.safeValidate(signatures)) {
       // Ensure that the `signatures` array is non-empty and that all signatures share the same
       // common message
-      throw new Error('Invalid `signatures` array: cannot be empty');
+      throw new Error(
+        'Invalid `signatures` array: cannot be empty. All oracles failed to provide valid signatures.'
+      );
     }
 
-    const diffIdx = signatures.findIndex(
-      sig => !sig.message.equals(signatures[0].message)
+    // Validate that all signatures have oracleIdx - required for queue order matching
+    for (let i = 0; i < signatures.length; i++) {
+      if (typeof signatures[i].oracleIdx !== 'number') {
+        throw new Error(
+          `Signature at index ${i} missing oracleIdx field - required for queue ordering`
+        );
+      }
+    }
+
+    // Sort signatures by oracleIdx to match queue order - CRITICAL for verification
+    // The Rust verification code expects signatures in the same order as oracle_signing_keys
+    const sortedSignatures = [...signatures].sort(
+      (a, b) => a.oracleIdx - b.oracleIdx
+    );
+
+    const diffIdx = sortedSignatures.findIndex(
+      sig => !sig.message.equals(sortedSignatures[0].message)
     );
     if (diffIdx !== -1) {
-      const expectedMessage = signatures[0].message.toString('base64');
-      const differentMessage = signatures[diffIdx].message.toString('base64');
+      const expectedMessage = sortedSignatures[0].message.toString('base64');
+      const differentMessage =
+        sortedSignatures[diffIdx].message.toString('base64');
       throw new Error(`
         All signatures must share the same message. The signed message at #${diffIdx}
         (${differentMessage}) does not match the expected message (${expectedMessage})
@@ -48,12 +72,12 @@ export class Secp256k1InstructionUtils {
 
     // We've validated that all signatures share the same message, so we can use the first
     // signature's message as the common message.
-    const commonMessage = signatures[0].message;
+    const commonMessage = sortedSignatures[0].message;
     const commonMessageSize = commonMessage.length;
 
     const signatureBlockSize =
       SIGNATURE_SERIALIZED_SIZE + 1 + HASHED_PUBKEY_SERIALIZED_SIZE;
-    const numSignatures = signatures.length;
+    const numSignatures = sortedSignatures.length;
     const offsetsAreaSize =
       1 + numSignatures * SIGNATURE_OFFSETS_SERIALIZED_SIZE;
     const messageOffset = offsetsAreaSize + numSignatures * signatureBlockSize;
@@ -61,7 +85,7 @@ export class Secp256k1InstructionUtils {
     const signatureOffsets: Uint8Array[] = [];
     const signatureBuffer: number[] = [];
 
-    for (const sig of signatures) {
+    for (const sig of sortedSignatures) {
       // Calculate the offset of the current signature block
       const currentOffset = offsetsAreaSize + signatureBuffer.length;
       // Create a new Uint8Array to store the signature offsets

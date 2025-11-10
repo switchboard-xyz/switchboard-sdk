@@ -1,4 +1,4 @@
-import { web3 } from '@coral-xyz/anchor-30';
+import { web3 } from '@coral-xyz/anchor-31';
 
 /**
  *  Address of the SPL Token program.

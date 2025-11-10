@@ -2,8 +2,8 @@ import { getNodePayer } from '../utils/index.js';
 
 import { Queue } from './queue.js';
 
-import type { BN, Program } from '@coral-xyz/anchor-30';
-import { web3 } from '@coral-xyz/anchor-30';
+import type { BN, Program } from '@coral-xyz/anchor-31';
+import { web3 } from '@coral-xyz/anchor-31';
 import { Buffer } from 'buffer';
 
 export interface StateData {

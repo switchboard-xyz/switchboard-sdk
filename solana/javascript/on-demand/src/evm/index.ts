@@ -7,18 +7,11 @@ import type {
 
 import {
   createAttestationHexString,
-  createUpdateHexString,
   createV0AttestationHexString,
 } from './message.js';
 
-import {
-  Big,
-  CrossbarClient,
-  IOracleJob,
-  OracleJob,
-} from '@switchboard-xyz/common';
+import { CrossbarClient, IOracleJob, OracleJob } from '@switchboard-xyz/common';
 import axios from 'axios';
-import bs58 from 'bs58';
 import { Buffer } from 'buffer';
 
 export * as message from './message.js';
@@ -32,7 +25,7 @@ export interface FeedUpdateCommonOptions {
   recentHash?: string; // Hex string of length 64 (32 bytes) which does not start with 0x
   aggregatorId?: string; // Specify the aggregator ID if the feed already exists
   blockNumber?: number; // The block number
-  gateway?: Gateway; // Gateway (optional)
+  gateway: Gateway; // Gateway
 }
 
 // Define a type for the input parameters
@@ -45,12 +38,12 @@ export interface AttestationOptions {
   blockNumber: number; // The timestamp
   queueId: string; // The queue ID (queue pubkey as hex)
   oracleId: string; // The oracle ID (oracle pubkey as hex)
-  gateway?: Gateway; // The gateway account (optional)
+  gateway: Gateway; // The gateway account
 }
 
 // Feed simulation result
 export interface FeedSimulateResult {
-  result: number;
+  result: string;
   feedId: string;
   response: FeedEvalResponse;
 }
@@ -58,7 +51,7 @@ export interface FeedSimulateResult {
 // Feed update result
 export interface FeedUpdateResult {
   feedId: string;
-  result: number;
+  result: string;
   encoded: string;
   response: FeedEvalResponse;
 }
@@ -142,173 +135,6 @@ function getCrossbarUrl(crossbarUrl?: string): string {
 }
 
 /**
- * Get the feed update data for a particular feed
- * @dev - this function is heavily rate limited
- * @param params the feed update parameters
- * @param queue the queue account
- * @returns the feed simulation result and feed id
- */
-export async function simulateFeed(
-  params: FeedUpdateParams,
-  queue: Queue
-): Promise<FeedSimulateResult> {
-  const gateway = params.gateway ?? (await queue.fetchGateway());
-  const result = (
-    await gateway.fetchSignatures({
-      ...params,
-      useTimestamp: true,
-      recentHash: bs58.encode(
-        Buffer.from(params.recentHash ?? '0'.repeat(64), 'hex')
-      ),
-    })
-  ).responses[0];
-
-  return {
-    result: new Big(result.success_value).div(new Big(10).pow(18)).toNumber(),
-    feedId: result.feed_hash,
-    response: result,
-  };
-}
-
-/**
- * Get the feed update data for a particular feed
- * @param params the feed update parameters
- * @param queue the queue account
- * @returns the feed update data, the byte arrays that need to be sent to the target chain
- */
-export async function getFeedUpdateData(
-  params: FeedUpdateParams,
-  queue: Queue
-): Promise<string[]> {
-  return (await getFeedUpdateWithContext(params, queue)).responses.map(
-    r => r.encoded
-  );
-}
-
-/**
- * Get the feed update data for a particular feed
- * @param params the feed update parameters
- * @param queue the queue account
- * @returns the feed update data with context (numeric result data, oracle response, AND encoded response)
- */
-export async function getFeedUpdateWithContext(
-  params: FeedUpdateParams,
-  queue: Queue
-): Promise<{
-  responses: FeedUpdateResult[];
-  failures: string[];
-}> {
-  // Set the blockhash
-  const blockhash = params.recentHash ?? '0'.repeat(64);
-
-  // if we just want the time feed, return
-  if (params.jobs.length === 0) {
-    {
-      return {
-        responses: [],
-        failures: [],
-      };
-    }
-  }
-
-  // Get the Feed Update if the feed exists
-  // Setup the updates array
-  const updates = await getUpdate(
-    {
-      ...params,
-      recentHash: blockhash,
-    },
-    queue
-  );
-
-  return updates;
-}
-
-/**
- * Get the update message for the EVM for a particular feed
- * This is useful for feeds that have already been created on chain
- * @param params - FeedUpdateCommonOptions: Parameters for the upsert message
- * @param queue - Queue: The queue account
- * @returns - Promise<string> - The update message as a hex string
- */
-export async function getUpdate(
-  params: FeedUpdateCommonOptions,
-  queue: Queue
-): Promise<{
-  responses: FeedUpdateResult[];
-  failures: string[];
-}> {
-  if (!params.recentHash) {
-    params.recentHash = '0'.repeat(64);
-  }
-
-  // slice if the recentHash starts with 0x
-  if (params.recentHash.startsWith('0x')) {
-    params.recentHash = params.recentHash.slice(2);
-  }
-
-  const gateway = params.gateway ?? (await queue.fetchGateway());
-
-  const { responses, failures } = await gateway.fetchSignatures({
-    ...params,
-    useTimestamp: true,
-    recentHash: bs58.encode(Buffer.from(params.recentHash, 'hex')),
-  });
-  const response: FeedUpdateResult[] = [];
-
-  for (const result of responses) {
-    if (!result.success_value) {
-      failures.push(result.failure_error.toString());
-      continue;
-    }
-
-    // Decode from Base64 to a Buffer
-    const signatureBuffer = new Uint8Array(
-      Buffer.from(result.signature, 'base64')
-    );
-
-    // Assuming each component (r and s) is 32 bytes long
-    const r = Buffer.from(signatureBuffer.slice(0, 32)).toString('hex');
-    const s = Buffer.from(signatureBuffer.slice(32, 64)).toString('hex');
-    const v = result.recovery_id;
-
-    // Create the upsert message
-    const updateString = createUpdateHexString({
-      discriminator: 1,
-      feedId: params.aggregatorId ?? result.feed_hash.toString(),
-      result: result.success_value.toString(),
-      blockNumber: params.blockNumber?.toString() ?? '0',
-      timestamp: result.timestamp?.toString(),
-      r,
-      s,
-      v,
-    });
-
-    // Add the response to the array
-    const res = {
-      feedId: result.feed_hash,
-      result: new Big(result.success_value).div(new Big(10).pow(18)).toNumber(),
-      encoded: updateString,
-      response: result,
-    };
-
-    // Add the response to the array
-    response.push(res);
-  }
-
-  // Sort the response by timestamp, ascending
-  response.sort(
-    (a, b) => (a.response.timestamp ?? 0) - (b.response.timestamp ?? 0)
-  );
-
-  // Return the response
-  return {
-    responses: response,
-    failures,
-  };
-}
-
-/**
  * Get attestation for a particular oracle on a particular queue
  * @param options - AttestationOptions: Options for the attestation
  * @returns - Promise<string> - The attestation as a hex string
@@ -316,13 +142,12 @@ export async function getUpdate(
 export async function getAttestation(
   options: AttestationOptions
 ): Promise<AttestationResult> {
-  const { guardianQueue, recentHash, queueId, oracleId, gateway, blockNumber } =
-    options;
-  const gatewayAccount = gateway ?? (await guardianQueue.fetchGateway());
+  const { recentHash, queueId, oracleId, gateway, blockNumber } = options;
+  const gatewayAccount = gateway;
   const chainHash = recentHash.startsWith('0x')
     ? recentHash.slice(2)
     : recentHash;
-  const attestation = await gatewayAccount.fetchBridgingMessage({
+  const attestation = await gatewayAccount!.fetchBridgingMessage({
     chainHash,
     queuePubkey: queueId,
     oraclePubkey: oracleId,

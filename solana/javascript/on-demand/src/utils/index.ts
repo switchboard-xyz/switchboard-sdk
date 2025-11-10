@@ -1,14 +1,14 @@
 import { Oracle } from '../accounts/oracle.js';
 import type { PullFeed } from '../accounts/pullFeed.js';
 import { Queue } from '../accounts/queue.js';
-import { AnchorUtils } from '../anchor-utils/AnchorUtils.js';
+import { AnchorUtils } from '../anchor-utils/anchor-utils.js';
 import {
   SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
 } from '../constants.js';
 
-import type { Program } from '@coral-xyz/anchor-30';
-import { web3 } from '@coral-xyz/anchor-30';
+import type { Program } from '@coral-xyz/anchor-31';
+import { web3 } from '@coral-xyz/anchor-31';
 import type { IOracleJob } from '@switchboard-xyz/common';
 import { CrossbarClient } from '@switchboard-xyz/common';
 import { Buffer } from 'buffer';
@@ -51,32 +51,59 @@ export function createLoadLookupTables() {
 
 export const loadLookupTables = createLoadLookupTables();
 
-// Mainnet ID's
+/**
+ * Mainnet program and queue addresses
+ *
+ * These are the official Switchboard On-Demand addresses for mainnet.
+ * Most applications should use the default queue rather than deploying
+ * their own.
+ */
+
+/** Switchboard On-Demand program ID on mainnet */
 export const ON_DEMAND_MAINNET_PID = new web3.PublicKey(
   'SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv'
 );
+
+/** Guardian queue for mainnet (internal use) */
 export const ON_DEMAND_MAINNET_GUARDIAN_QUEUE = new web3.PublicKey(
   'B7WgdyAgzK7yGoxfsBaNnY6d41bTybTzEh4ZuQosnvLK'
 );
+
+/** Default oracle queue on mainnet - use this for production */
 export const ON_DEMAND_MAINNET_QUEUE = new web3.PublicKey(
   'A43DyUGA7s8eXPxqEjJY6EBu1KKbNgfxF8h17VAHn13w'
 );
+
+/** Queue PDA (Program Derived Address) for mainnet */
 export const ON_DEMAND_MAINNET_QUEUE_PDA =
   web3.PublicKey.findProgramAddressSync(
     [Buffer.from('Queue'), ON_DEMAND_MAINNET_QUEUE.toBuffer()],
     ON_DEMAND_MAINNET_PID
   )[0];
 
-// Devnet ID's
+/**
+ * Devnet program and queue addresses
+ *
+ * These are the official Switchboard On-Demand addresses for devnet.
+ * Use these for development and testing.
+ */
+
+/** Switchboard On-Demand program ID on devnet */
 export const ON_DEMAND_DEVNET_PID = new web3.PublicKey(
   'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2'
 );
+
+/** Guardian queue for devnet (internal use) */
 export const ON_DEMAND_DEVNET_GUARDIAN_QUEUE = new web3.PublicKey(
   'BeZ4tU4HNe2fGQGUzJmNS2UU2TcZdMUUgnCH6RPg4Dpi'
 );
+
+/** Default oracle queue on devnet - use this for testing */
 export const ON_DEMAND_DEVNET_QUEUE = new web3.PublicKey(
   'EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7'
 );
+
+/** Queue PDA for devnet (note: uses mainnet PID for compatibility) */
 export const ON_DEMAND_DEVNET_QUEUE_PDA = web3.PublicKey.findProgramAddressSync(
   [Buffer.from('Queue'), ON_DEMAND_DEVNET_QUEUE.toBuffer()],
   ON_DEMAND_MAINNET_PID // SVM Devnet networks should be launched with SBond... as PID
@@ -165,12 +192,24 @@ export function getDefaultQueueAddress(isMainnet: boolean) {
 }
 
 /**
- * Get the default queue for the Switchboard program
- * @param solanaRPCUrl - (optional) string: The Solana RPC URL
- * @returns - Promise<Queue> - The default queue
- * @NOTE - SWITCHBOARD PID AND QUEUE PUBKEY ARE WRONG
+ * Gets the default Switchboard queue for the specified network
+ *
+ * Automatically detects whether you're on mainnet or devnet and returns
+ * the appropriate default queue. This is the recommended way to get started
+ * with Switchboard On-Demand.
+ *
+ * @param {string} solanaRPCUrl - Solana RPC endpoint URL (defaults to mainnet)
+ * @returns {Promise<Queue>} The default queue instance
+ *
+ * @example
+ * ```typescript
+ * // Get default queue for current network
+ * const queue = await getDefaultQueue();
+ *
+ * // Specify custom RPC
+ * const queue = await getDefaultQueue('https://api.devnet.solana.com');
+ * ```
  */
-
 export async function getDefaultQueue(
   solanaRPCUrl: string = web3.clusterApiUrl('mainnet-beta')
 ): Promise<Queue> {
@@ -310,3 +349,7 @@ export function getAssociatedTokenAddressSync(
 export function getNodePayer(program: Program): web3.Keypair {
   return (program.provider as any).wallet.payer; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
+
+// Re-export SPL Token constants
+export { SPL_TOKEN_PROGRAM_ID as TOKEN_PROGRAM_ID } from '../constants.js';
+export { SOL_NATIVE_MINT as NATIVE_MINT } from '../constants.js';

@@ -1,22 +1,34 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::{AccountMeta, Instruction};
+use solana_program::sysvar::slot_hashes;
 
 use crate::anchor_traits::*;
-use crate::get_sb_program_id;
 use crate::prelude::*;
+use crate::{get_sb_program_id, solana_program, Pubkey};
 
+/// Guardian quote verification instruction
 pub struct GuardianQuoteVerify {}
 
+/// Parameters for guardian quote verification instruction
 #[derive(Clone, Debug)]
 pub struct GuardianQuoteVerifyParams {
+    /// Unix timestamp of the verification
     pub timestamp: i64,
+    /// MR_ENCLAVE measurement from the trusted execution environment
     pub mr_enclave: [u8; 32],
+    /// Index of the oracle in the queue
     pub idx: u32,
+    /// ED25519 public key for signature verification
     pub ed25519_key: Pubkey,
+    /// SECP256K1 public key (64 bytes)
     pub secp256k1_key: [u8; 64],
+    /// Slot number for this verification
     pub slot: u64,
+    /// ECDSA signature (64 bytes)
     pub signature: [u8; 64],
+    /// Recovery ID for signature verification
     pub recovery_id: u8,
+    /// List of security advisories
     pub advisories: Vec<u32>,
 }
 
@@ -38,34 +50,56 @@ impl BorshSerialize for GuardianQuoteVerifyParams {
 impl InstructionData for GuardianQuoteVerifyParams {}
 
 impl Discriminator for GuardianQuoteVerifyParams {
-    const DISCRIMINATOR: [u8; 8] = GuardianQuoteVerify::DISCRIMINATOR;
+    const DISCRIMINATOR: &'static [u8] = GuardianQuoteVerify::DISCRIMINATOR;
 }
 
+const DISCRIMINATOR: &'static [u8] = &[168, 36, 93, 156, 157, 150, 148, 45];
 impl Discriminator for GuardianQuoteVerify {
-    const DISCRIMINATOR: [u8; 8] = [168, 36, 93, 156, 157, 150, 148, 45];
+    const DISCRIMINATOR: &'static [u8] = DISCRIMINATOR;
 }
 
+/// Arguments for building a guardian quote verification instruction
 pub struct GuardianQuoteVerifyArgs {
+    /// Guardian account public key
     pub guardian: Pubkey,
+    /// Oracle account public key
     pub oracle: Pubkey,
+    /// Authority account public key
     pub authority: Pubkey,
+    /// Guardian queue account public key
     pub guardian_queue: Pubkey,
+    /// Unix timestamp of the verification
     pub timestamp: i64,
+    /// MR_ENCLAVE measurement from the trusted execution environment
     pub mr_enclave: [u8; 32],
+    /// Index of the oracle in the queue
     pub idx: u32,
+    /// ED25519 public key for signature verification
     pub ed25519_key: Pubkey,
+    /// SECP256K1 public key (64 bytes)
     pub secp256k1_key: [u8; 64],
+    /// Slot number for this verification
     pub slot: u64,
+    /// ECDSA signature (64 bytes)
     pub signature: [u8; 64],
+    /// Recovery ID for signature verification
     pub recovery_id: u8,
+    /// List of security advisories
     pub advisories: Vec<u32>,
 }
+/// Account metas for guardian quote verification instruction
 pub struct GuardianQuoteVerifyAccounts {
+    /// Guardian account public key
     pub guardian: Pubkey,
+    /// Oracle account public key
     pub oracle: Pubkey,
+    /// Authority account public key
     pub authority: Pubkey,
+    /// Guardian queue account public key
     pub guardian_queue: Pubkey,
+    /// Global state account public key
     pub state: Pubkey,
+    /// Recent slot hashes sysvar account
     pub recent_slothashes: Pubkey,
 }
 impl ToAccountMetas for GuardianQuoteVerifyAccounts {
@@ -82,8 +116,9 @@ impl ToAccountMetas for GuardianQuoteVerifyAccounts {
 }
 
 impl GuardianQuoteVerify {
+    /// Builds a guardian quote verification instruction
     pub fn build_ix(args: GuardianQuoteVerifyArgs) -> Result<Instruction, OnDemandError> {
-        let pid = if cfg!(feature = "devnet") {
+        let pid = if crate::utils::is_devnet() {
             get_sb_program_id("devnet")
         } else {
             get_sb_program_id("mainnet")
@@ -96,7 +131,7 @@ impl GuardianQuoteVerify {
                 authority: args.authority,
                 guardian_queue: args.guardian_queue,
                 state: State::get_pda(),
-                recent_slothashes: solana_program::sysvar::slot_hashes::ID,
+                recent_slothashes: slot_hashes::ID,
             },
             &GuardianQuoteVerifyParams {
                 timestamp: args.timestamp,

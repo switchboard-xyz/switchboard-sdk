@@ -10,7 +10,7 @@
     "allowJs": true,
 
     // Best practices
-    "strict": true,
+    "strict": false,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,

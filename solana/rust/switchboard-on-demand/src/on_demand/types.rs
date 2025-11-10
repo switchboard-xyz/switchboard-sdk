@@ -1,10 +1,11 @@
-use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::clock::Clock;
 
-use crate::VerificationStatus;
+use crate::{solana_program, Pubkey, VerificationStatus};
 
+/// MR_ENCLAVE measurement type (32 bytes)
 pub type MrEnclave = [u8; 32];
 
+/// TEE quote verification data structure
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Zeroable, bytemuck::Pod)]
 pub struct Quote {
@@ -21,14 +22,19 @@ pub struct Quote {
     pub valid_until: i64,
     /// The off-chain registry where the verifiers quote can be located.
     pub quote_registry: [u8; 32],
-    /// Key to lookup the buffer data on IPFS or an alternative decentralized storage solution.
+    /// Key to lookup the buffer data in decentralized storage solutions.
     pub registry_key: [u8; 64],
     /// The secp256k1 public key of the enclave signer. Derived from the enclave_signer.
     pub secp256k1_signer: [u8; 64],
+    /// Last ED25519 signer public key
     pub last_ed25519_signer: Pubkey,
+    /// Last SECP256K1 signer public key (64 bytes)
     pub last_secp256k1_signer: [u8; 64],
+    /// Slot number when keys were last rotated
     pub last_rotate_slot: u64,
+    /// Array of guardian approver public keys
     pub guardian_approvers: [Pubkey; 64],
+    /// Number of active guardian approvers
     pub guardian_approvers_len: u8,
     padding2: [u8; 7],
     /// Reserved.
@@ -40,6 +46,7 @@ impl Default for Quote {
     }
 }
 impl Quote {
+    /// Checks if the quote is currently verified based on clock
     pub fn is_verified(&self, clock: &Clock) -> bool {
         match self.verification_status.into() {
             VerificationStatus::VerificationOverride => true,

@@ -4,7 +4,7 @@ import {
   SPL_SYSVAR_SLOT_HASHES_ID,
   SPL_TOKEN_PROGRAM_ID,
 } from '../constants.js';
-import { InstructionUtils } from '../instruction-utils/InstructionUtils.js';
+import { InstructionUtils } from '../instruction-utils/instruction-utils.js';
 import { Gateway } from '../oracle-interfaces/gateway.js';
 import * as spl from '../utils/index.js';
 import { getLutKey, getLutSigner } from '../utils/lookupTable.js';
@@ -13,8 +13,8 @@ import { Oracle, OracleAccountData } from './oracle.js';
 import { Queue } from './queue.js';
 import { State } from './state.js';
 
-import type { Program } from '@coral-xyz/anchor-30';
-import { BN, web3 } from '@coral-xyz/anchor-30';
+import type { Program } from '@coral-xyz/anchor-31';
+import { BN, web3 } from '@coral-xyz/anchor-31';
 import bs58 from 'bs58';
 import { Buffer } from 'buffer';
 
@@ -131,25 +131,34 @@ export class Randomness {
    */
   async commitIx(
     queue: web3.PublicKey,
-    authority_?: web3.PublicKey
+    authority_?: web3.PublicKey,
+    oracle_?: web3.PublicKey
   ): Promise<web3.TransactionInstruction> {
     const queueAccount = new Queue(this.program, queue);
     let oracle: web3.PublicKey;
 
     // If we're on a non-Solana SVM network - we'll need the oracle address as a PDA on the target chain
-    if (isNonSolana(queue)) {
+    if (oracle_) {
+      oracle = oracle_;
+    } else if (isNonSolana(queue)) {
       const isMainnet = queue.equals(spl.ON_DEMAND_MAINNET_QUEUE_PDA);
       const solanaQueue = await spl.getQueue({
         program: this.program,
         queueAddress: spl.getDefaultQueueAddress(isMainnet),
       });
-      const solanaOracle = await solanaQueue.fetchFreshOracle();
+      const solanaOracleInstance =
+        await solanaQueue.fetchOracleByLatestVersion();
       [oracle] = web3.PublicKey.findProgramAddressSync(
-        [Buffer.from('Oracle'), queue.toBuffer(), solanaOracle.toBuffer()],
+        [
+          Buffer.from('Oracle'),
+          queue.toBuffer(),
+          solanaOracleInstance.pubkey.toBuffer(),
+        ],
         spl.ON_DEMAND_MAINNET_PID
       );
     } else {
-      oracle = await queueAccount.fetchFreshOracle();
+      const oracleInstance = await queueAccount.fetchOracleByLatestVersion();
+      oracle = oracleInstance.pubkey;
     }
 
     const authority = authority_ ?? (await this.loadData()).authority;
@@ -177,6 +186,7 @@ export class Randomness {
   async revealIx(
     payer_?: web3.PublicKey
   ): Promise<web3.TransactionInstruction> {
+    await new Promise(f => setTimeout(f, 3000));
     const payer = Randomness.getPayer(this.program, payer_);
     const data = await this.loadData();
 
@@ -199,7 +209,7 @@ export class Randomness {
       ''
     );
 
-    const gateway = new Gateway(this.program, gatewayUrl);
+    const gateway = new Gateway(gatewayUrl);
     const gatewayRevealResponse = await gateway.fetchRandomnessReveal({
       randomnessAccount: this.pubkey,
       slothash: bs58.encode(data.seedSlothash),
@@ -405,5 +415,39 @@ export class Randomness {
 
     // TODO: Why do we return the account keypair? The authority is already set to the payer right?
     return [account, accountKeypair, [creationIx, commitIx]];
+  }
+
+  /**
+   * Generate a randomness `close` solana transaction instruction.
+   * This will close the randomness account and return the rent to the authority.
+   *
+   * @returns {Promise<web3.TransactionInstruction>} A promise that resolves to the transaction instruction.
+   */
+  async closeIx(): Promise<web3.TransactionInstruction> {
+    const data = await this.loadData();
+    const lutSigner = getLutSigner(this.program.programId, this.pubkey);
+    const lutKey = getLutKey(lutSigner, data.lutSlot);
+
+    const ix = this.program.instruction.randomnessClose(
+      {},
+      {
+        accounts: {
+          randomness: this.pubkey,
+          rewardEscrow: spl.getAssociatedTokenAddressSync(
+            SOL_NATIVE_MINT,
+            this.pubkey
+          ),
+          authority: data.authority,
+          programState: State.keyFromSeed(this.program),
+          systemProgram: web3.SystemProgram.programId,
+          tokenProgram: SPL_TOKEN_PROGRAM_ID,
+          wrappedSolMint: SOL_NATIVE_MINT,
+          lut: lutKey,
+          lutSigner: lutSigner,
+          addressLookupTableProgram: web3.AddressLookupTableProgram.programId,
+        },
+      }
+    );
+    return ix;
   }
 }

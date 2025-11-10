@@ -1,7 +1,7 @@
 import { SPL_SYSVAR_SLOT_HASHES_ID } from '../constants.js';
 
-import type { web3 } from '@coral-xyz/anchor-30';
-import { BN } from '@coral-xyz/anchor-30';
+import type { web3 } from '@coral-xyz/anchor-31';
+import { BN } from '@coral-xyz/anchor-31';
 import bs58 from 'bs58';
 
 /**

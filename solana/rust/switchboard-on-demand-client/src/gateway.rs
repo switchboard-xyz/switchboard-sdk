@@ -1,4 +1,4 @@
-use crate::oracle_job::OracleJob;
+use protos::oracle_job::OracleJob;
 use base64::prelude::*;
 use prost::Message;
 use reqwest::header::CONTENT_TYPE;
@@ -30,13 +30,13 @@ pub struct FetchSignaturesConsensusResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsensusOracleResponse {
-        pub oracle_pubkey: String,
-        pub eth_address: String,
-        pub signature: String,
-        pub checksum: String,
-        pub recovery_id: i32,
-        pub feed_responses: Vec<FeedEvalResponse>,
-        pub errors: Vec<Option<String>>,
+    pub oracle_pubkey: String,
+    pub eth_address: String,
+    pub signature: String,
+    pub checksum: String,
+    pub recovery_id: i32,
+    pub feed_responses: Vec<FeedEvalResponse>,
+    pub errors: Vec<Option<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -302,20 +302,28 @@ impl Gateway {
         &self,
         params: FetchSignaturesConsensusParams,
     ) -> Result<FetchSignaturesConsensusResponse, reqwest::Error> {
-        let url = format!("{}/gateway/api/v1/fetch_signatures_consensus", self.gateway_url);
+        let url = format!(
+            "{}/gateway/api/v1/fetch_signatures_consensus",
+            self.gateway_url
+        );
+        println!("Fetching signatures from: {}", url);
         // Build feed_requests array from feed_configs
-        let feed_requests: Vec<serde_json::Value> = params.feed_configs.iter().map(|config| {
-            // If max_variance or min_responses are not provided, use default values.
-            let max_variance = config.max_variance.unwrap_or(1);
-            let min_responses = config.min_responses.unwrap_or(1);
-            serde_json::json!({
-                "jobs_b64_encoded": config.encoded_jobs,
-                "max_variance": (max_variance as f64 * 1e9) as u64,
-                "min_responses": min_responses,
-                "use_timestamp": params.use_timestamp.unwrap_or(false)
+        let feed_requests: Vec<serde_json::Value> = params
+            .feed_configs
+            .iter()
+            .map(|config| {
+                // If max_variance or min_responses are not provided, use default values.
+                let max_variance = config.max_variance.unwrap_or(1);
+                let min_responses = config.min_responses.unwrap_or(1);
+                serde_json::json!({
+                    "jobs_b64_encoded": config.encoded_jobs,
+                    "max_variance": (max_variance as f64 * 1e9) as u64,
+                    "min_responses": min_responses,
+                    "use_timestamp": params.use_timestamp.unwrap_or(false)
+                })
             })
-        }).collect();
-        
+            .collect();
+
         let body = serde_json::json!({
             "api_version": "1.0.0",
             "recent_hash": params.recent_hash.unwrap_or_else(|| bs58::encode(vec![0; 32]).into_string()),
@@ -324,14 +332,15 @@ impl Gateway {
             "feed_requests": feed_requests,
             "num_oracles": params.num_signatures.unwrap_or(1)
         });
-        
-        let res = self.client
+
+        let res = self
+            .client
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
             .await?;
-        
+
         let response = res.json::<FetchSignaturesConsensusResponse>().await?;
         Ok(response)
     }

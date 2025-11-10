@@ -1,2 +1,2 @@
-export * from './InstructionUtils.js';
-export * from './Secp256k1InstructionUtils.js';
+export * from './instruction-utils.js';
+export * from './secp256k1-instruction-utils.js';

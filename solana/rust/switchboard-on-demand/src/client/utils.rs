@@ -1,29 +1,24 @@
 use crate::prelude::*;
 use anyhow::anyhow;
 use sha2::{Digest, Sha256};
-use solana_client::nonblocking::rpc_client::RpcClient as NonblockingRpcClient;
-use solana_sdk::client::SyncClient;
-use solana_sdk::signer::keypair::{keypair_from_seed, read_keypair_file, Keypair};
-use solana_sdk::signer::Signer;
+use crate::solana_compat::solana_sdk::signer::keypair::{keypair_from_seed, read_keypair_file, Keypair};
+use crate::solana_compat::solana_sdk::signer::Signer;
 use std::env;
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use solana_sdk::transaction::Transaction;
-use solana_program::message::Message;
+use crate::solana_compat::solana_sdk::transaction::Transaction;
 use crate::anchor_traits::*;
-use solana_program::pubkey::Pubkey;
-use anchor_client::anchor_lang::AccountDeserialize;
-use borsh::BorshSerialize;
+use crate::Pubkey;
 use anyhow::Error as AnyhowError;
-use solana_sdk::message::v0::Message as V0Message;
-use solana_sdk::transaction::VersionedTransaction;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
-use solana_program::hash::Hash;
-use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::address_lookup_table::AddressLookupTableAccount;
-use solana_program::message::VersionedMessage::V0;
+use crate::solana_compat::solana_sdk::message::v0::Message as V0Message;
+use crate::solana_compat::solana_sdk::transaction::VersionedTransaction;
+use crate::solana_compat::compute_budget::ComputeBudgetInstruction;
+use crate::solana_program::hash::Hash;
+use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
+use crate::solana_compat::address_lookup_table::AddressLookupTableAccount;
+use crate::solana_compat::solana_sdk::message::VersionedMessage::V0;
 
 pub async fn ix_to_tx_v0(
     rpc_client: &RpcClient,
@@ -32,23 +27,69 @@ pub async fn ix_to_tx_v0(
     blockhash: Hash,
     luts: &[AddressLookupTableAccount],
 ) -> Result<VersionedTransaction, OnDemandError> {
-    let payer = signers[0].pubkey();
+    let payer_original = signers[0].pubkey();
+    let payer: crate::solana_compat::solana_sdk::pubkey::Pubkey = payer_original.to_bytes().into();
 
     // Auto-detect Compute Unit Limit
     let compute_unit_limit = estimate_compute_units(rpc_client, ixs, luts, blockhash, signers).await.unwrap_or(1_400_000); // Default to 1.4M units if estimate fails
 
     // Add Compute Budget Instruction (Optional but improves execution)
-    let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit((compute_unit_limit as f64 * 1.6) as u32);
+    let cus = std::cmp::min((compute_unit_limit as f64 * 1.4) as u32, 1_400_000);
+    let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(cus);
     // TODO: make dynamic
     let priority_fee_ix = ComputeBudgetInstruction::set_compute_unit_price(10_000);
+
+    // Convert SDK instructions to program instructions
+    let compute_budget_ix_converted = Instruction {
+        program_id: compute_budget_ix.program_id.to_bytes().into(),
+        accounts: compute_budget_ix.accounts.iter().map(|acc| AccountMeta {
+            pubkey: acc.pubkey.to_bytes().into(),
+            is_signer: acc.is_signer,
+            is_writable: acc.is_writable,
+        }).collect(),
+        data: compute_budget_ix.data.clone(),
+    };
+
+    let priority_fee_ix_converted = Instruction {
+        program_id: priority_fee_ix.program_id.to_bytes().into(),
+        accounts: priority_fee_ix.accounts.iter().map(|acc| AccountMeta {
+            pubkey: acc.pubkey.to_bytes().into(),
+            is_signer: acc.is_signer,
+            is_writable: acc.is_writable,
+        }).collect(),
+        data: priority_fee_ix.data.clone(),
+    };
+
     let mut final_ixs = vec![
-        compute_budget_ix,
-        priority_fee_ix,
+        compute_budget_ix_converted,
+        priority_fee_ix_converted,
     ];
     final_ixs.extend_from_slice(ixs);
 
+    // Convert AddressLookupTableAccount types
+    let converted_luts: Vec<crate::solana_compat::AddressLookupTableAccount> = luts.iter().map(|lut| {
+        crate::solana_compat::AddressLookupTableAccount {
+            key: lut.key.to_bytes().into(),
+            addresses: lut.addresses.iter().map(|addr| addr.to_bytes().into()).collect(),
+        }
+    }).collect();
+
+    // Convert instructions to anchor-client types
+    let converted_ixs: Vec<crate::solana_compat::solana_sdk::instruction::Instruction> = final_ixs.iter().map(|ix| {
+        crate::solana_compat::solana_sdk::instruction::Instruction {
+            program_id: ix.program_id.to_bytes().into(),
+            accounts: ix.accounts.iter().map(|acc| crate::solana_compat::solana_sdk::instruction::AccountMeta {
+                pubkey: acc.pubkey.to_bytes().into(),
+                is_signer: acc.is_signer,
+                is_writable: acc.is_writable,
+            }).collect(),
+            data: ix.data.clone(),
+        }
+    }).collect();
+
     // Create Message with Address Lookup Tables (ALTs)
-    let message = V0Message::try_compile(&payer, &final_ixs, luts, blockhash)
+    let converted_blockhash: crate::solana_compat::solana_sdk::hash::Hash = blockhash.to_bytes().into();
+    let message = V0Message::try_compile(&payer, &converted_ixs, &converted_luts, converted_blockhash)
         .map_err(|_| OnDemandError::SolanaSignError)?;
 
     let message = V0(message);
@@ -68,10 +109,44 @@ pub async fn ix_to_tx_v0(
 
 /// Estimates Compute Unit Limit for Instructions
 async fn estimate_compute_units(rpc_client: &RpcClient, ixs: &[Instruction], luts: &[AddressLookupTableAccount], blockhash: Hash, signers: &[&Keypair]) -> Result<u32, AnyhowError> {
-    let payer = signers[0].pubkey();
+    let payer_original = signers[0].pubkey();
+    let payer: crate::solana_compat::solana_sdk::pubkey::Pubkey = payer_original.to_bytes().into();
     let mut ixs = ixs.to_vec();
-    ixs.insert(0, ComputeBudgetInstruction::set_compute_unit_limit(1_400_000).into());
-    let message = V0Message::try_compile(&payer, &ixs, luts, blockhash)
+    let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
+    let compute_limit_ix_converted = Instruction {
+        program_id: compute_limit_ix.program_id.to_bytes().into(),
+        accounts: compute_limit_ix.accounts.iter().map(|acc| AccountMeta {
+            pubkey: acc.pubkey.to_bytes().into(),
+            is_signer: acc.is_signer,
+            is_writable: acc.is_writable,
+        }).collect(),
+        data: compute_limit_ix.data.clone(),
+    };
+    ixs.insert(0, compute_limit_ix_converted);
+
+    // Convert AddressLookupTableAccount types for this function too
+    let converted_luts: Vec<crate::solana_compat::AddressLookupTableAccount> = luts.iter().map(|lut| {
+        crate::solana_compat::AddressLookupTableAccount {
+            key: lut.key.to_bytes().into(),
+            addresses: lut.addresses.iter().map(|addr| addr.to_bytes().into()).collect(),
+        }
+    }).collect();
+
+    // Convert instructions to anchor-client types
+    let converted_ixs: Vec<crate::solana_compat::solana_sdk::instruction::Instruction> = ixs.iter().map(|ix| {
+        crate::solana_compat::solana_sdk::instruction::Instruction {
+            program_id: ix.program_id.to_bytes().into(),
+            accounts: ix.accounts.iter().map(|acc| crate::solana_compat::solana_sdk::instruction::AccountMeta {
+                pubkey: acc.pubkey.to_bytes().into(),
+                is_signer: acc.is_signer,
+                is_writable: acc.is_writable,
+            }).collect(),
+            data: ix.data.clone(),
+        }
+    }).collect();
+    let converted_blockhash: crate::solana_compat::solana_sdk::hash::Hash = blockhash.to_bytes().into();
+
+    let message = V0Message::try_compile(&payer, &converted_ixs, &converted_luts, converted_blockhash)
         .map_err(|_| OnDemandError::SolanaSignError)?;
 
     // Create Versioned Transaction
@@ -92,11 +167,25 @@ async fn estimate_compute_units(rpc_client: &RpcClient, ixs: &[Instruction], lut
 pub fn ix_to_tx(
     ixs: &[Instruction],
     signers: &[&Keypair],
-    blockhash: solana_program::hash::Hash,
+    blockhash: crate::solana_program::hash::Hash,
 ) -> Result<Transaction, OnDemandError> {
-    let msg = Message::new(ixs, Some(&signers[0].pubkey()));
-    let mut tx = Transaction::new_unsigned(msg);
-    tx.try_sign(&signers.to_vec(), blockhash)
+    // Convert instructions to compatible type for solana_sdk
+    let converted_ixs: Vec<crate::solana_compat::solana_sdk::instruction::Instruction> = ixs.iter().map(|ix| {
+        crate::solana_compat::solana_sdk::instruction::Instruction {
+            program_id: ix.program_id.to_bytes().into(),
+            accounts: ix.accounts.iter().map(|acc| crate::solana_compat::solana_sdk::instruction::AccountMeta {
+                pubkey: acc.pubkey.to_bytes().into(),
+                is_signer: acc.is_signer,
+                is_writable: acc.is_writable,
+            }).collect(),
+            data: ix.data.clone(),
+        }
+    }).collect();
+
+    let converted_msg = crate::solana_compat::solana_sdk::message::Message::new(&converted_ixs, Some(&signers[0].pubkey().to_bytes().into()));
+    let mut tx = Transaction::new_unsigned(converted_msg);
+    let converted_blockhash: crate::solana_compat::solana_sdk::hash::Hash = blockhash.to_bytes().into();
+    tx.try_sign(&signers.to_vec(), converted_blockhash)
         .map_err(|_e| OnDemandError::SolanaSignError)?;
     Ok(tx)
 }
@@ -106,7 +195,8 @@ pub async fn get_enclave_signer_pubkey(
 ) -> Result<Arc<Pubkey>, OnDemandError> {
     let enclave_signer = enclave_signer.clone();
     let ro_enclave_signer = enclave_signer.read().await;
-    let pubkey = Arc::new(ro_enclave_signer.pubkey());
+    let pubkey_bytes = ro_enclave_signer.pubkey().to_bytes();
+    let pubkey = Arc::new(Pubkey::new_from_array(pubkey_bytes));
     Ok(pubkey)
 }
 
@@ -198,13 +288,9 @@ pub fn keypair_from_base_seed(
     // Optionally, allow the progam ID to be included in the bytes so we
     // can create new environments on different program IDs without collisions.
     if let Some(program_id) = program_id.as_ref() {
-        seed.extend_from_slice(&program_id.try_to_vec().unwrap_or_default());
+        seed.extend_from_slice(program_id.as_ref());
     } else {
-        seed.extend_from_slice(
-            &*SWITCHBOARD_ON_DEMAND_PROGRAM_ID
-                .try_to_vec()
-                .unwrap_or_default(),
-        );
+        seed.extend_from_slice(crate::get_switchboard_on_demand_program_id().as_ref());
     }
 
     match keypair_from_seed(&Sha256::digest(&seed)) {
@@ -220,7 +306,8 @@ pub fn keypair_from_base_seed(
 }
 
 pub fn signer_to_pubkey(signer: Arc<Keypair>) -> std::result::Result<Pubkey, OnDemandError> {
-    Ok(signer.pubkey())
+    let pubkey_bytes = signer.pubkey().to_bytes();
+    Ok(Pubkey::new_from_array(pubkey_bytes))
 }
 
 pub fn load_keypair_fs(fs_path: &str) -> Result<Arc<Keypair>, OnDemandError> {
@@ -236,130 +323,13 @@ pub fn load_keypair_fs(fs_path: &str) -> Result<Arc<Keypair>, OnDemandError> {
     }
 }
 
-/// Fetches a zero-copy account from the Solana blockchain.
-///
-/// # Arguments
-///
-/// * `client` - The Solana RPC client used to interact with the blockchain.
-/// * `pubkey` - The public key of the account to fetch.
-///
-/// # Returns
-///
-/// Returns a result containing the fetched account data as the specified type `T`, or an `OnDemandError` if an error occurs.
-///
-/// # Errors
-///
-/// This function can return the following errors:
-///
-/// * `OnDemandError::AccountNotFound` - If the account with the specified public key is not found.
-/// * `OnDemandError::Message("no discriminator found")` - If no discriminator is found in the account data.
-/// * `OnDemandError::Message("Discriminator error, check the account type")` - If the discriminator in the account data does not match the expected discriminator for type `T`.
-/// * `OnDemandError::Message("AnchorParseError")` - If an error occurs while parsing the account data into type `T`.
-pub fn fetch_zerocopy_account<T: bytemuck::Pod + Discriminator + Owner>(
-    client: &solana_client::rpc_client::RpcClient,
+
+pub async fn fetch_zerocopy_account<T: bytemuck::Pod + Discriminator + Owner>(
+    client: &crate::RpcClient,
     pubkey: Pubkey,
 ) -> Result<T, OnDemandError> {
     let data = client
-        .get_account_data(&pubkey)
-        .map_err(|_| OnDemandError::AccountNotFound)?;
-
-    if data.len() < T::discriminator().len() {
-        return Err(OnDemandError::InvalidDiscriminator);
-    }
-
-    let mut disc_bytes = [0u8; 8];
-    disc_bytes.copy_from_slice(&data[..8]);
-    if disc_bytes != T::discriminator() {
-        return Err(OnDemandError::InvalidDiscriminator);
-    }
-
-    Ok(*bytemuck::try_from_bytes::<T>(&data[8..])
-        .map_err(|_| OnDemandError::AnchorParseError)?)
-}
-
-/// Fetches the account data synchronously from the Solana blockchain using the provided client.
-///
-/// # Arguments
-///
-/// * `client` - The client used to interact with the Solana blockchain.
-/// * `pubkey` - The public key of the account to fetch.
-///
-/// # Generic Parameters
-///
-/// * `C` - The type of the client, which must implement the `SyncClient` trait.
-/// * `T` - The type of the account data, which must implement the `bytemuck::Pod`, `Discriminator`, and `Owner` traits.
-///
-/// # Returns
-///
-/// Returns a `Result` containing the fetched account data of type `T` if successful, or an `OnDemandError` if an error occurs.
-pub fn fetch_zerocopy_account_sync<C: SyncClient, T: bytemuck::Pod + Discriminator + Owner>(
-    client: &C,
-    pubkey: Pubkey,
-) -> Result<T, OnDemandError> {
-    let data = client
-        .get_account_data(&pubkey)
-        .map_err(|_| OnDemandError::AccountNotFound)?
-        .ok_or(OnDemandError::AccountNotFound)?;
-
-    if data.len() < T::discriminator().len() {
-        return Err(OnDemandError::InvalidDiscriminator);
-    }
-
-    let mut disc_bytes = [0u8; 8];
-    disc_bytes.copy_from_slice(&data[..8]);
-    if disc_bytes != T::discriminator() {
-        return Err(OnDemandError::InvalidDiscriminator);
-    }
-
-    Ok(*bytemuck::try_from_bytes::<T>(&data[8..])
-        .map_err(|_| OnDemandError::AnchorParseError)?)
-}
-
-/// Fetches an account asynchronously using the provided client and public key.
-///
-/// # Arguments
-///
-/// * `client` - The non-blocking RPC client used to fetch the account.
-/// * `pubkey` - The public key of the account to fetch.
-///
-/// # Generic Parameters
-///
-/// * `T` - The type of the account data. Must implement `bytemuck::Pod`, `Discriminator`, and `Owner`.
-///
-/// # Returns
-///
-/// Returns a `Result` containing the fetched account data of type `T` if successful, or an `OnDemandError` if an error occurs.
-///
-/// # Errors
-///
-/// This function can return the following errors:
-///
-/// * `OnDemandError::AccountNotFound` - If the account is not found.
-/// * `OnDemandError::Message("no discriminator found")` - If no discriminator is found in the account data.
-/// * `OnDemandError::Message("Discriminator error, check the account type")` - If the discriminator does not match the expected value.
-/// * `OnDemandError::Message("AnchorParseError")` - If there is an error parsing the account data into type `T`.
-///
-/// # Example
-///
-/// ```rust
-/// use switchboard_solana::client::NonblockingRpcClient;
-/// use switchboard_solana::error::OnDemandError;
-/// use switchboard_solana::types::{Discriminator, Owner};
-/// use bytemuck::Pod;
-/// use solana_sdk::pubkey::Pubkey;
-///
-/// async fn example(client: &NonblockingRpcClient, pubkey: Pubkey) -> Result<(), OnDemandError> {
-///     let account_data: MyAccountType = fetch_zerocopy_account_async(client, pubkey).await?;
-///     // Do something with the fetched account data...
-///     Ok(())
-/// }
-/// ```
-pub async fn fetch_zerocopy_account_async<T: bytemuck::Pod + Discriminator + Owner>(
-    client: &NonblockingRpcClient,
-    pubkey: Pubkey,
-) -> Result<T, OnDemandError> {
-    let data = client
-        .get_account_data(&pubkey)
+        .get_account_data(&pubkey.to_bytes().into())
         .await
         .map_err(|_| OnDemandError::AccountNotFound)?;
 
@@ -376,43 +346,4 @@ pub async fn fetch_zerocopy_account_async<T: bytemuck::Pod + Discriminator + Own
     Ok(*bytemuck::try_from_bytes::<T>(&data[8..])
         .map_err(|_| OnDemandError::AnchorParseError)?)
 }
-
-pub fn fetch_borsh_account<T: Discriminator + Owner + AccountDeserialize>(
-    client: &solana_client::rpc_client::RpcClient,
-    pubkey: Pubkey,
-) -> Result<T, OnDemandError> {
-    let account_data = client
-        .get_account_data(&pubkey)
-        .map_err(|_| OnDemandError::AccountNotFound)?;
-
-    T::try_deserialize(&mut account_data.as_slice())
-        .map_err(|_| OnDemandError::AnchorParseError)
-}
-
-pub async fn fetch_borsh_account_async<T: Discriminator + Owner + AccountDeserialize>(
-    client: &NonblockingRpcClient,
-    pubkey: Pubkey,
-) -> Result<T, OnDemandError> {
-    let account_data = client
-        .get_account_data(&pubkey)
-        .await
-        .map_err(|_| OnDemandError::AccountNotFound)?;
-
-    T::try_deserialize(&mut account_data.as_slice())
-        .map_err(|_| OnDemandError::AnchorParseError)
-}
-
-pub fn fetch_borsh_account_sync<C: SyncClient, T: Discriminator + Owner + AccountDeserialize>(
-    client: &C,
-    pubkey: Pubkey,
-) -> Result<T, OnDemandError> {
-    let data = client
-        .get_account_data(&pubkey)
-        .map_err(|_| OnDemandError::AccountNotFound)?
-        .ok_or(OnDemandError::AccountNotFound)?;
-
-    T::try_deserialize(&mut data.as_slice()).map_err(|_| OnDemandError::AnchorParseError)
-}
-
-
 // type GenericError = Box<dyn std::error::Error + Send + Sync>;

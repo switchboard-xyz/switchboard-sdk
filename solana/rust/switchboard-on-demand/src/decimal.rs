@@ -7,9 +7,12 @@ use rust_decimal::Decimal;
 
 use crate::prelude::*;
 
+/// A decimal number serializable with Borsh
 #[derive(Default, Eq, PartialEq, Copy, Clone, BorshSerialize, BorshDeserialize)]
 pub struct BorshDecimal {
+    /// The mantissa (significant digits) of the decimal
     pub mantissa: i128,
+    /// The scale (number of decimal places)
     pub scale: u32,
 }
 impl From<Decimal> for BorshDecimal {
@@ -60,6 +63,7 @@ impl TryInto<Decimal> for BorshDecimal {
     }
 }
 
+/// Switchboard's internal decimal representation for oracle data
 #[repr(packed)]
 #[derive(Default, Debug, Eq, PartialEq, BorshDeserialize)]
 pub struct SwitchboardDecimal {
@@ -70,16 +74,20 @@ pub struct SwitchboardDecimal {
 }
 
 impl SwitchboardDecimal {
+    /// Creates a new SwitchboardDecimal with the given mantissa and scale
     pub fn new(mantissa: i128, scale: u32) -> SwitchboardDecimal {
         Self { mantissa, scale }
     }
+    /// Converts from rust_decimal::Decimal to SwitchboardDecimal
     pub fn from_rust_decimal(d: Decimal) -> SwitchboardDecimal {
         Self::new(d.mantissa(), d.scale())
     }
+    /// Creates a SwitchboardDecimal from a 64-bit floating point number
     pub fn from_f64(v: f64) -> SwitchboardDecimal {
         let dec = Decimal::from_f64(v).unwrap();
         Self::from_rust_decimal(dec)
     }
+    /// Scales the decimal to a new scale, returning the mantissa
     pub fn scale_to(&self, new_scale: u32) -> i128 {
         match { self.scale }.cmp(&new_scale) {
             std::cmp::Ordering::Greater => self
@@ -93,6 +101,7 @@ impl SwitchboardDecimal {
             std::cmp::Ordering::Equal => self.mantissa,
         }
     }
+    /// Returns a new SwitchboardDecimal with the specified scale
     pub fn new_with_scale(&self, new_scale: u32) -> Self {
         let mantissa = self.scale_to(new_scale);
         SwitchboardDecimal {

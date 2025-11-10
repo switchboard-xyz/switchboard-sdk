@@ -4,8 +4,8 @@ import { getLutKey, getLutSigner } from '../utils/lookupTable.js';
 
 import { State } from './state.js';
 
-import type { Program } from '@coral-xyz/anchor-30';
-import { BN, web3 } from '@coral-xyz/anchor-30';
+import type { Program } from '@coral-xyz/anchor-31';
+import { BN, web3 } from '@coral-xyz/anchor-31';
 import { Buffer } from 'buffer';
 
 export interface OracleAccountData {

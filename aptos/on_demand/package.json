@@ -3,7 +3,7 @@
   "type": "module",
   "module": "index.ts",
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^1.33.1",
+    "@aptos-labs/ts-sdk": "^2.0.1",
     "@switchboard-xyz/aptos-sdk": "latest",
     "@switchboard-xyz/on-demand": "latest",
     "superagent": "^10.1.1"

@@ -1,5 +1,5 @@
+use crate::get_switchboard_on_demand_program_id;
 use crate::LUT_SIGNER_SEED;
-use crate::SWITCHBOARD_ON_DEMAND_PROGRAM_ID;
 #[allow(unused_imports)]
 use crate::*;
 use anyhow_ext::anyhow;
@@ -14,7 +14,7 @@ use solana_sdk::pubkey::Pubkey;
 pub fn find_lut_signer(k: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[LUT_SIGNER_SEED, k.as_ref()],
-        &SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
+        &get_switchboard_on_demand_program_id(),
     )
     .0
 }
@@ -79,7 +79,7 @@ pub async fn load_lookup_tables<T: LutOwner + bytemuck::Pod>(
         lut_keys.push(lut_key);
     }
     let lut_datas = client
-        .get_multiple_accounts(&lut_keys.as_slice())
+        .get_multiple_accounts(lut_keys.as_slice())
         .await?
         .into_iter()
         .map(|data| data.unwrap_or_default().data.to_vec())

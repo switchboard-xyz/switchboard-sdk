@@ -1,1 +1,1 @@
-export * from './AnchorUtils.js';
+export * from './anchor-utils.js';

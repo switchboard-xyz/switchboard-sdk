@@ -83,9 +83,37 @@ impl EnclaveKeys {
         Ok(keypair.to_bytes())
     }
 
+    pub fn get_enclave_ed25519_keypair_with_seed(additional_seed: &[u8]) -> Result<[u8; 64], AnyhowError> {
+        let derived_key = Self::get_derived_key()?;
+        
+        // Combine the derived key with the additional seed
+        let mut hasher = Sha256::new();
+        hasher.update(&derived_key);
+        hasher.update(additional_seed);
+        let combined_seed = hasher.finalize();
+        
+        let keypair =
+            keypair_from_seed(&combined_seed).map_err(|e| AnyhowError::msg(e.to_string()))?;
+        Ok(keypair.to_bytes())
+    }
+
     pub fn get_enclave_secp256k1_keypair() -> Result<[u8; 32], AnyhowError> {
         let source = Self::get_derived_key()?;
         let mut rng = ChaCha20Rng::from_seed(Sha256::digest(&source).into());
+        let secp_key = libsecp256k1::SecretKey::random(&mut rng);
+        Ok(secp_key.serialize())
+    }
+
+    pub fn get_enclave_secp256k1_keypair_with_seed(additional_seed: &[u8]) -> Result<[u8; 32], AnyhowError> {
+        let derived_key = Self::get_derived_key()?;
+        
+        // Combine the derived key with the additional seed
+        let mut hasher = Sha256::new();
+        hasher.update(&derived_key);
+        hasher.update(additional_seed);
+        let combined_seed = hasher.finalize();
+        
+        let mut rng = ChaCha20Rng::from_seed(combined_seed.into());
         let secp_key = libsecp256k1::SecretKey::random(&mut rng);
         Ok(secp_key.serialize())
     }

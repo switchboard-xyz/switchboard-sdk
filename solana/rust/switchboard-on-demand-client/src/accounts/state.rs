@@ -1,4 +1,4 @@
-use crate::SWITCHBOARD_ON_DEMAND_PROGRAM_ID;
+use crate::get_switchboard_on_demand_program_id;
 use solana_sdk::pubkey::Pubkey;
 
 const STATE_SEED: &[u8] = b"STATE";
@@ -48,6 +48,6 @@ impl State {
     }
 
     pub fn pid() -> Pubkey {
-        *SWITCHBOARD_ON_DEMAND_PROGRAM_ID
+        get_switchboard_on_demand_program_id()
     }
 }

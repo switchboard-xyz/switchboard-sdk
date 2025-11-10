@@ -1,6 +1,6 @@
 import { getNodePayer } from '../utils/index.js';
 
-import type { Program, web3 } from '@coral-xyz/anchor-30';
+import type { Program, web3 } from '@coral-xyz/anchor-31';
 
 export enum SwitchboardPermission {
   PermitOracleHeartbeat = 1 << 0,

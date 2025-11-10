@@ -1,36 +1,49 @@
 use borsh::BorshSerialize;
-use solana_program::pubkey::Pubkey;
+use solana_program::instruction::AccountMeta;
 
 use crate::anchor_traits::*;
-use crate::cfg_client;
 use crate::prelude::*;
+use crate::{cfg_client, solana_program, Pubkey};
 
+/// Oracle heartbeat instruction version 2
 pub struct OracleHeartbeatV2;
 
+/// Parameters for oracle heartbeat instruction version 2
 #[derive(Clone, BorshSerialize, Debug)]
 pub struct OracleHeartbeatV2Params {
+    /// Optional URI for the oracle endpoint (64 bytes)
     pub uri: Option<[u8; 64]>,
 }
 
 impl InstructionData for OracleHeartbeatV2Params {}
 
 impl Discriminator for OracleHeartbeatV2 {
-    const DISCRIMINATOR: [u8; 8] = [122, 231, 66, 32, 226, 62, 144, 103];
+    const DISCRIMINATOR: &'static [u8] = &[122, 231, 66, 32, 226, 62, 144, 103];
 }
 impl Discriminator for OracleHeartbeatV2Params {
-    const DISCRIMINATOR: [u8; 8] = OracleHeartbeatV2::DISCRIMINATOR;
+    const DISCRIMINATOR: &'static [u8] = OracleHeartbeatV2::DISCRIMINATOR;
 }
 
+/// Arguments for building an oracle heartbeat instruction version 2
 pub struct OracleHeartbeatV2Args {
+    /// Oracle account public key
     pub oracle: Pubkey,
+    /// Oracle signer public key
     pub oracle_signer: Pubkey,
+    /// Garbage collection node public key
     pub gc_node: Pubkey,
+    /// Optional URI for the oracle endpoint (64 bytes)
     pub uri: Option<[u8; 64]>,
 }
+/// Account metas for oracle heartbeat instruction version 2
 pub struct OracleHeartbeatV2Accounts {
+    /// Oracle account public key
     pub oracle: Pubkey,
+    /// Oracle signer public key
     pub oracle_signer: Pubkey,
+    /// Queue account public key
     pub queue: Pubkey,
+    /// Garbage collection node public key
     pub gc_node: Pubkey,
 }
 impl ToAccountMetas for OracleHeartbeatV2Accounts {
@@ -49,13 +62,13 @@ impl ToAccountMetas for OracleHeartbeatV2Accounts {
 }
 
 cfg_client! {
-use solana_client::nonblocking::rpc_client::RpcClient;
+use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::get_sb_program_id;
 
 impl OracleHeartbeatV2 {
     pub async fn build_ix(client: &RpcClient, args: OracleHeartbeatV2Args) -> Result<Instruction, OnDemandError> {
         let oracle_data = OracleAccountData::fetch_async(client, args.oracle).await?;
-        let pid = if cfg!(feature = "devnet") {
+        let pid = if crate::utils::is_devnet() {
             get_sb_program_id("devnet")
         } else {
             get_sb_program_id("mainnet")

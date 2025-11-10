@@ -1,30 +1,39 @@
 use std::cell::Ref;
 
+// Compatibility shim for anchor-lang borsh macros
 #[cfg(feature = "anchor")]
-use anchor_lang::{
-    account, error, zero_copy, AnchorDeserialize, AnchorSerialize, Discriminator, Owner, ZeroCopy,
-};
+mod borsh {
+    pub use ::borsh::*;
+    pub mod maybestd {
+        pub mod io {
+            pub use std::io::*;
+        }
+    }
+}
+#[cfg(feature = "anchor")]
+use anchor_lang::{AnchorDeserialize, AnchorSerialize, Discriminator, Owner, ZeroCopy};
 use bytemuck;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
-use solana_program::clock::Clock;
-use solana_program::pubkey::Pubkey;
 
 #[cfg(not(feature = "anchor"))]
 use crate::anchor_traits::{Discriminator, Owner, ZeroCopy};
-use crate::*;
+use crate::{Pubkey, *};
 
+/// Default decimal precision for Switchboard oracle values
 pub const PRECISION: u32 = 18;
 
+/// Returns the Switchboard On-Demand program ID
 pub fn sb_pid() -> Pubkey {
-    let pid = if cfg!(feature = "devnet") {
+    let pid = if crate::utils::is_devnet() {
         get_sb_program_id("devnet")
     } else {
         get_sb_program_id("mainnet")
     };
-    pid
+    pid.to_bytes().into()
 }
 
+/// Current oracle aggregation result with statistics
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
@@ -45,6 +54,7 @@ pub struct CurrentResult {
     pub num_samples: u8,
     /// The index of the submission that was used to calculate this result
     pub submission_idx: u8,
+    /// Padding bytes for alignment
     pub padding1: [u8; 6],
     /// The slot at which this value was signed.
     pub slot: u64,
@@ -54,6 +64,7 @@ pub struct CurrentResult {
     pub max_slot: u64,
 }
 impl CurrentResult {
+    /// Force override result values (debug builds only)
     pub fn debug_only_force_override(&mut self, value: i128, slot: u64) {
         self.value = value;
         self.slot = slot;
@@ -116,6 +127,7 @@ impl CurrentResult {
         Some(Decimal::from_i128_with_scale(self.max_value, PRECISION))
     }
 
+    /// Returns the slot when this result was recorded
     pub fn result_slot(&self) -> Option<u64> {
         if self.slot == 0 {
             return None;
@@ -123,6 +135,7 @@ impl CurrentResult {
         Some(self.slot)
     }
 
+    /// Returns the minimum slot of submissions used in this result
     pub fn min_slot(&self) -> Option<u64> {
         if self.slot == 0 {
             return None;
@@ -130,6 +143,7 @@ impl CurrentResult {
         Some(self.min_slot)
     }
 
+    /// Returns the maximum slot of submissions used in this result
     pub fn max_slot(&self) -> Option<u64> {
         if self.slot == 0 {
             return None;
@@ -138,6 +152,7 @@ impl CurrentResult {
     }
 }
 
+/// Individual oracle submission data
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
@@ -152,6 +167,7 @@ pub struct OracleSubmission {
     pub value: i128,
 }
 
+/// Compact historical oracle result for storage efficiency
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
@@ -182,30 +198,44 @@ pub struct PullFeedAccountData {
     pub feed_hash: [u8; 32],
     /// The slot at which this account was initialized.
     pub initialized_at: i64,
+    /// Permission flags for feed operations
     pub permissions: u64,
+    /// Maximum allowed variance between oracle submissions
     pub max_variance: u64,
+    /// Minimum number of oracle responses required
     pub min_responses: u32,
+    /// Human-readable name for this feed
     pub name: [u8; 32],
     padding1: [u8; 2],
+    /// Index for the next historical result entry
     pub historical_result_idx: u8,
+    /// Minimum number of samples required for a valid result
     pub min_sample_size: u8,
+    /// Unix timestamp of the last feed update
     pub last_update_timestamp: i64,
+    /// Slot number for address lookup table
     pub lut_slot: u64,
     _reserved1: [u8; 32],
+    /// Current aggregated result from oracle submissions
     pub result: CurrentResult,
+    /// Maximum age in slots before data is considered stale
     pub max_staleness: u32,
     padding2: [u8; 12],
+    /// Array of historical oracle results
     pub historical_results: [CompactResult; 32],
     _ebuf4: [u8; 8],
     _ebuf3: [u8; 24],
+    /// Timestamps of oracle submissions
     pub submission_timestamps: [i64; 32],
 }
 
 impl OracleSubmission {
+    /// Returns true if this submission is empty (uninitialized)
     pub fn is_empty(&self) -> bool {
         self.slot == 0
     }
 
+    /// Returns the submitted value as a Decimal with standard precision
     pub fn value(&self) -> Decimal {
         Decimal::from_i128_with_scale(self.value, PRECISION)
     }
@@ -214,38 +244,61 @@ impl OracleSubmission {
 impl PullFeedAccountData {
     /// Returns true if the value in the current result is within
     /// staleness threshold
-    pub fn is_result_vaild(&self, clock: &Clock) -> bool {
-        self.result.slot >= clock.slot - self.max_staleness as u64
+    pub fn is_result_vaild(&self, clock_slot: u64) -> bool {
+        self.result.slot >= clock_slot - self.max_staleness as u64
     }
 
+    /// Returns the oracle submission that was used for the current result
     pub fn result_submission(&self) -> &OracleSubmission {
         &self.submissions[self.result.submission_idx as usize]
     }
 
+    /// Returns the timestamp of the submission used for current result
     pub fn result_ts(&self) -> i64 {
         let idx = self.result.submission_idx as usize;
         self.submission_timestamps[idx]
     }
 
+    /// Returns the slot when the current result submission landed on-chain
     pub fn result_land_slot(&self) -> u64 {
         let submission = self.submissions[self.result.submission_idx as usize];
         submission.landed_at
     }
 
+    /// Parses pull feed account data from raw bytes
     pub fn parse<'info>(data: Ref<'info, &mut [u8]>) -> Result<Ref<'info, Self>, OnDemandError> {
-        if data.len() < Self::discriminator().len() {
+        if data.len() < Self::DISCRIMINATOR.len() {
             return Err(OnDemandError::InvalidDiscriminator);
         }
 
         let mut disc_bytes = [0u8; 8];
         disc_bytes.copy_from_slice(&data[..8]);
-        if disc_bytes != Self::discriminator() {
+        if disc_bytes != Self::DISCRIMINATOR {
             return Err(OnDemandError::InvalidDiscriminator);
         }
 
-        Ok(Ref::map(data, |data: &&mut [u8]| {
-            bytemuck::from_bytes(&data[8..std::mem::size_of::<Self>() + 8])
-        }))
+        // Check size before attempting to parse
+        let expected_size = std::mem::size_of::<Self>() + 8;
+        if data.len() < expected_size {
+            return Err(OnDemandError::InvalidData);
+        }
+
+        // Validate the slice can be safely cast before using from_bytes
+        let slice_to_parse = &data[8..expected_size];
+        if slice_to_parse.len() != std::mem::size_of::<Self>() {
+            return Err(OnDemandError::InvalidData);
+        }
+
+        // Check alignment requirements for bytemuck
+        match bytemuck::try_from_bytes::<Self>(slice_to_parse) {
+            Ok(_) => {
+                // If try_from_bytes succeeds, we know from_bytes will also succeed
+                Ok(Ref::map(data, |data: &&mut [u8]| {
+                    bytemuck::from_bytes(&data[8..std::mem::size_of::<Self>() + 8])
+                }))
+            }
+            Err(_) => Err(OnDemandError::AccountDeserializeError),
+        }
     }
 
     /// Generate a checksum for the given feed hash, result, slothash, max_variance and min_responses
@@ -311,11 +364,11 @@ impl PullFeedAccountData {
     /// * `clock` - the clock to use for the current slot
     /// * `max_staleness` - the maximum number of slots to consider
     /// * `min_samples` - the minimum number of samples required to return a value
-    /// **returns**
+    ///   **returns**
     /// * `Ok(Decimal)` - the median value of the submissions in the last `max_staleness` slots
     pub fn get_value(
         &self,
-        clock: &Clock,
+        clock_slot: u64,
         max_staleness: u64,
         min_samples: u32,
         only_positive: bool,
@@ -324,7 +377,7 @@ impl PullFeedAccountData {
             .submissions
             .iter()
             .take_while(|s| !s.is_empty())
-            .filter(|s| s.slot >= clock.slot - max_staleness)
+            .filter(|s| s.slot >= clock_slot - max_staleness)
             .collect::<Vec<_>>();
         if submissions.len() < min_samples as usize {
             return Err(OnDemandError::NotEnoughSamples);
@@ -340,11 +393,11 @@ impl PullFeedAccountData {
     }
 
     /// List of samples that are valid for the current slot
-    pub fn valid_samples(&self, clock: &Clock) -> Vec<&OracleSubmission> {
+    pub fn valid_samples(&self, clock_slot: u64) -> Vec<&OracleSubmission> {
         self.submissions
             .iter()
             .take_while(|s| !s.is_empty())
-            .filter(|s| s.slot >= clock.slot - self.max_staleness as u64)
+            .filter(|s| s.slot >= clock_slot - self.max_staleness as u64)
             .collect()
     }
 
@@ -372,6 +425,7 @@ impl PullFeedAccountData {
         (min_ts, max_ts)
     }
 
+    /// Returns the slot of the most recent submission
     pub fn last_update_slot(&self) -> u64 {
         self.submissions
             .iter()
@@ -382,8 +436,8 @@ impl PullFeedAccountData {
 
     /// The median value of the submissions needed for quorom size
     /// Fails if the result is not valid or stale.
-    pub fn value(&self, clock: &Clock) -> Result<Decimal, OnDemandError> {
-        if self.result.result_slot().unwrap_or(0) < clock.slot - self.max_staleness as u64 {
+    pub fn value(&self, clock_slot: u64) -> Result<Decimal, OnDemandError> {
+        if self.result.result_slot().unwrap_or(0) < clock_slot - self.max_staleness as u64 {
             return Err(OnDemandError::StaleResult);
         }
         self.result.value().ok_or(OnDemandError::StaleResult)
@@ -418,17 +472,20 @@ impl PullFeedAccountData {
 impl ZeroCopy for PullFeedAccountData {}
 impl Owner for PullFeedAccountData {
     fn owner() -> Pubkey {
-        sb_pid()
+        sb_pid().to_bytes().into()
     }
 }
+const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
 impl Discriminator for PullFeedAccountData {
-    const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
+    const DISCRIMINATOR: &'static [u8] = &DISCRIMINATOR;
 }
 
+/// Type alias for PullFeedAccountData for backward compatibility
 pub type SbFeed = PullFeedAccountData;
 
 // takes the rounded down median of a list of numbers
-pub fn lower_bound_median(numbers: &mut Vec<i128>) -> Option<i128> {
+/// Calculates the lower bound median of oracle submission values
+pub fn lower_bound_median(numbers: &mut [i128]) -> Option<i128> {
     numbers.sort(); // Sort the numbers in ascending order.
 
     let len = numbers.len();

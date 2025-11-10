@@ -1,3 +1,5 @@
+use crate::secp256k1::Secp256k1InstructionUtils;
+use crate::secp256k1::SecpSignature;
 use crate::Gateway;
 use crate::OracleAccountData;
 use crate::State;
@@ -14,6 +16,7 @@ use bytemuck;
 use dashmap::DashMap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::address_lookup_table::AddressLookupTableAccount;
 use solana_sdk::instruction::AccountMeta;
@@ -24,9 +27,6 @@ use std::result::Result;
 use std::sync::Arc;
 use tokio::join;
 use tokio::sync::OnceCell;
-use sha2::{Digest, Sha256};
-use crate::secp256k1::Secp256k1InstructionUtils;
-use crate::secp256k1::SecpSignature;
 
 type LutCache = DashMap<Pubkey, AddressLookupTableAccount>;
 type JobCache = DashMap<[u8; 32], OnceCell<Vec<OracleJob>>>;
@@ -42,7 +42,7 @@ pub fn generate_combined_checksum(
     hasher.update(queue_key);
 
     for feed in feeds {
-        hasher.update(&feed.feed_hash);
+        hasher.update(feed.feed_hash);
         hasher.update(feed.max_variance.to_le_bytes());
         hasher.update(feed.min_responses.to_le_bytes());
     }
@@ -152,7 +152,7 @@ impl PullFeed {
         key: &Pubkey,
     ) -> Result<PullFeedAccountData, AnyhowError> {
         let account = client
-            .get_account_data(&key)
+            .get_account_data(key)
             .await
             .map_err(|_| anyhow!("PullFeed.load_data: Account not found"))?;
         let account = account[8..].to_vec();
@@ -189,7 +189,7 @@ impl PullFeed {
             remaining_accounts.push(AccountMeta::new(stats_key, false));
         }
         let mut submit_ix = Instruction {
-            program_id: *SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
+            program_id: get_switchboard_on_demand_program_id(),
             data: PullFeedSubmitResponseParams { slot, submissions }.data(),
             accounts: PullFeedSubmitResponse {
                 feed: params.feed,
@@ -348,25 +348,25 @@ impl PullFeed {
         Ok((submit_signatures_ix, oracle_responses, num_successes, luts))
     }
 
-/// Fetch the oracle responses for multiple feeds via the consensus endpoint,
-/// build the necessary secp256k1 verification instruction and the feed update instruction,
-/// and return these instructions along with the required lookup tables.
-///
-/// # Arguments
-/// * `context` - Shared context holding caches for feeds, jobs, and lookup tables.
-/// * `client` - The RPC client for connecting to the cluster.
-/// * `params` - Parameters for fetching updates, including:
-///     - `feeds`: A vector of feed public keys.
-///     - `payer`: The payer public key.
-///     - `gateway`: A Gateway instance for the API calls.
-///     - `crossbar`: Optional CrossbarClient instance.
-///     - `num_signatures`: Optional override for the number of signatures to fetch.
-///     - `debug`: Optional flag to print debug logs.
-///
-/// # Returns
-/// A tuple containing:
-///   1. A vector of two Instructions (first is secp256k1 verification, second is the feed update).
-///   2. A vector of AddressLookupTableAccount to include in the transaction.
+    /// Fetch the oracle responses for multiple feeds via the consensus endpoint,
+    /// build the necessary secp256k1 verification instruction and the feed update instruction,
+    /// and return these instructions along with the required lookup tables.
+    ///
+    /// # Arguments
+    /// * `context` - Shared context holding caches for feeds, jobs, and lookup tables.
+    /// * `client` - The RPC client for connecting to the cluster.
+    /// * `params` - Parameters for fetching updates, including:
+    ///     - `feeds`: A vector of feed public keys.
+    ///     - `payer`: The payer public key.
+    ///     - `gateway`: A Gateway instance for the API calls.
+    ///     - `crossbar`: Optional CrossbarClient instance.
+    ///     - `num_signatures`: Optional override for the number of signatures to fetch.
+    ///     - `debug`: Optional flag to print debug logs.
+    ///
+    /// # Returns
+    /// A tuple containing:
+    ///   1. A vector of two Instructions (first is secp256k1 verification, second is the feed update).
+    ///   2. A vector of AddressLookupTableAccount to include in the transaction.
     pub async fn fetch_update_consensus_ix(
         context: Arc<SbContext>,
         client: &RpcClient,
@@ -457,6 +457,16 @@ impl PullFeed {
         };
         // Extract oracle keys from the gateway responses.
         let mut remaining_accounts = Vec::new();
+        if price_signatures.oracle_responses.is_empty() {
+            return Err(anyhow_ext::Error::msg(
+                "PullFeed.fetchUpdateConsensusIx Failure: No oracle responses".to_string(),
+            ));
+        }
+        if price_signatures.median_responses.is_empty() {
+            return Err(anyhow_ext::Error::msg(
+                "PullFeed.fetchUpdateConsensusIx Failure: No success responses found".to_string(),
+            ));
+        }
         let oracle_keys: Vec<Pubkey> = price_signatures
             .oracle_responses
             .iter()
@@ -478,11 +488,13 @@ impl PullFeed {
                     .unwrap()
                     .try_into()
                     .expect("slice with incorrect length"),
-                signature: base64.decode(&oracle_response.signature)
+                signature: base64
+                    .decode(&oracle_response.signature)
                     .unwrap()
                     .try_into()
                     .expect("slice with incorrect length"),
-                message: base64.decode(&oracle_response.checksum)
+                message: base64
+                    .decode(&oracle_response.checksum)
                     .unwrap()
                     .try_into()
                     .expect("slice with incorrect length"),
@@ -492,7 +504,9 @@ impl PullFeed {
 
         // Build the secp256k1 instruction:
         let secp_ix = Secp256k1InstructionUtils::build_secp256k1_instruction(&secp_signatures, 0)
-            .map_err(|_|anyhow!("Feed failed to produce signatures: Failed to build secp256k1 instruction"))?;
+            .map_err(|_| {
+            anyhow!("Feed failed to produce signatures: Failed to build secp256k1 instruction")
+        })?;
 
         // Match each median response to its corresponding feed account by comparing feed hashes.
         let feed_pubkeys: Vec<Pubkey> = price_signatures
@@ -500,7 +514,7 @@ impl PullFeed {
             .iter()
             .map(|median_response| {
                 let matching = feed_datas.iter().find(|(_, data)| {
-                    let feed_hash_hex = hex::encode(&data.feed_hash);
+                    let feed_hash_hex = hex::encode(data.feed_hash);
                     feed_hash_hex == median_response.feed_hash
                 });
                 if let Some((feed, _)) = matching {
@@ -542,9 +556,9 @@ impl PullFeed {
 
         // Construct the instruction that updates the feed consensus using the consensus payload.
         let mut submit_ix = Instruction {
-            program_id: *SWITCHBOARD_ON_DEMAND_PROGRAM_ID,
+            program_id: get_switchboard_on_demand_program_id(),
             data: consensus_ix_data.data(),
-            accounts: PullFeedSubmitResponseConsensus  {
+            accounts: PullFeedSubmitResponseConsensus {
                 queue,
                 program_state: State::key(),
                 recent_slothashes: solana_sdk::sysvar::slot_hashes::ID,

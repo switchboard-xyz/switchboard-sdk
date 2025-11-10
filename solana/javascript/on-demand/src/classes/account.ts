@@ -1,4 +1,4 @@
-import { Program, web3 } from '@coral-xyz/anchor-30';
+import { Program, web3 } from '@coral-xyz/anchor-31';
 
 /**
  *  Base class for all Switchboard account types.
