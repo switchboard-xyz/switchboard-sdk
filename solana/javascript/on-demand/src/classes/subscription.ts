@@ -898,6 +898,423 @@ export async function closeSubscription(params: {
 }
 
 // ============================================================================
+// INSTRUCTION-ONLY FUNCTIONS (for wallet adapters)
+// ============================================================================
+
+/**
+ * Build create subscription instruction (does not send transaction)
+ * Use this for wallet adapters that need to sign transactions
+ *
+ * @example
+ * ```typescript
+ * const ix = await createSubscriptionIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   tierId: 2,
+ *   epochAmount: 15,
+ *   queue,
+ * });
+ * // Sign and send with wallet adapter
+ * await sendTransaction(transaction.add(ix), connection);
+ * ```
+ */
+export async function createSubscriptionIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  tierId: number;
+  epochAmount: number;
+  contactName?: string;
+  contactEmail?: string;
+  queue: Queue;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive PDAs
+  const [statePda] = getStatePda(programId);
+  const [tierPda] = getTierPda(params.tierId, programId);
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+  const [tokenVaultPda] = getTokenVaultPda(SWTCH_MINT, programId);
+  const payerTokenAccount = getAssociatedTokenAddressSync(
+    SWTCH_MINT,
+    params.owner
+  );
+  const quoteAccount = getQuoteAccount(params.queue.pubkey);
+
+  // Build subscription init instruction
+  const subscriptionIx = await program.methods
+    .subscriptionInit({
+      tierId: params.tierId,
+      contactName: params.contactName || null,
+      contactEmail: params.contactEmail || null,
+      epochAmount: new BN(params.epochAmount),
+    })
+    .accounts({
+      state: statePda,
+      subscription: subscriptionPda,
+      tier: tierPda,
+      owner: params.owner,
+      payer: params.owner,
+      paymentMint: SWTCH_MINT,
+      payerTokenAccount,
+      tokenVault: tokenVaultPda,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      quoteAccount,
+      sysvars: {
+        clock: SYSVAR_CLOCK_PUBKEY,
+        slothashes: SYSVAR_SLOT_HASHES_PUBKEY,
+        instructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+      },
+    })
+    .instruction();
+
+  return subscriptionIx;
+}
+
+/**
+ * Build upgrade subscription instruction (does not send transaction)
+ *
+ * @example
+ * ```typescript
+ * const ix = await upgradeSubscriptionIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   newTierId: 3,
+ *   epochAmount: 15,
+ *   queue,
+ * });
+ * ```
+ */
+export async function upgradeSubscriptionIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  newTierId: number;
+  epochAmount: number;
+  queue: Queue;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive PDAs
+  const [statePda] = getStatePda(programId);
+  const [newTierPda] = getTierPda(params.newTierId, programId);
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+  const [tokenVaultPda] = getTokenVaultPda(SWTCH_MINT, programId);
+  const ownerTokenAccount = getAssociatedTokenAddressSync(
+    SWTCH_MINT,
+    params.owner
+  );
+  const quoteAccount = getQuoteAccount(params.queue.pubkey);
+
+  // Fetch subscription to get current tier
+  const subscription =
+    await program.account.subscription.fetch(subscriptionPda);
+  const currentTierId = subscription.tierId;
+  const [currentTierPda] = getTierPda(currentTierId, programId);
+
+  // Build upgrade instruction
+  const upgradeIx = await program.methods
+    .subscriptionUpgrade({
+      newTierId: params.newTierId,
+      epochAmount: new BN(params.epochAmount),
+    })
+    .accounts({
+      state: statePda,
+      subscription: subscriptionPda,
+      newTier: newTierPda,
+      owner: params.owner,
+      paymentMint: SWTCH_MINT,
+      payerTokenAccount: ownerTokenAccount,
+      tokenVault: tokenVaultPda,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      quoteAccount,
+      sysvars: {
+        clock: SYSVAR_CLOCK_PUBKEY,
+        slothashes: SYSVAR_SLOT_HASHES_PUBKEY,
+        instructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+      },
+    })
+    .remainingAccounts([
+      { pubkey: currentTierPda, isSigner: false, isWritable: false },
+    ])
+    .instruction();
+
+  return upgradeIx;
+}
+
+/**
+ * Build downgrade subscription instruction (does not send transaction)
+ * Note: Downgrade is credit-only, no oracle needed
+ *
+ * @example
+ * ```typescript
+ * const ix = await downgradeSubscriptionIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   newTierId: 1,
+ * });
+ * ```
+ */
+export async function downgradeSubscriptionIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  newTierId: number;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive PDAs
+  const [statePda] = getStatePda(programId);
+  const [newTierPda] = getTierPda(params.newTierId, programId);
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+
+  // Fetch subscription to get current tier
+  const subscription =
+    await program.account.subscription.fetch(subscriptionPda);
+  const currentTierId = subscription.tierId;
+  const [currentTierPda] = getTierPda(currentTierId, programId);
+
+  // Build downgrade instruction (credit-only, no payment)
+  const downgradeIx = await program.methods
+    .subscriptionDowngrade({
+      newTierId: params.newTierId,
+    })
+    .accounts({
+      state: statePda,
+      subscription: subscriptionPda,
+      newTier: newTierPda,
+      owner: params.owner,
+    })
+    .remainingAccounts([
+      { pubkey: currentTierPda, isSigner: false, isWritable: false },
+    ])
+    .instruction();
+
+  return downgradeIx;
+}
+
+/**
+ * Build extend subscription instruction (does not send transaction)
+ *
+ * @example
+ * ```typescript
+ * const ix = await extendSubscriptionIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   epochAmount: 10,
+ *   queue,
+ * });
+ * ```
+ */
+export async function extendSubscriptionIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  epochAmount: number;
+  adminExtend?: boolean;
+  queue?: Queue;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive PDAs
+  const [statePda] = getStatePda(programId);
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+
+  // Fetch subscription to get current tier
+  const subscription =
+    await program.account.subscription.fetch(subscriptionPda);
+  const currentTierId = subscription.tierId;
+  const [tierPda] = getTierPda(currentTierId, programId);
+
+  if (params.adminExtend) {
+    // Admin extend - no payment or oracle needed
+    const extendIx = await program.methods
+      .subscriptionExtend({
+        epochAmount: new BN(params.epochAmount),
+        adminExtend: true,
+      })
+      .accounts({
+        state: statePda,
+        subscription: subscriptionPda,
+        tier: tierPda,
+        payer: params.owner,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction();
+
+    return extendIx;
+  } else {
+    // User extend - requires payment and oracle
+    if (!params.queue) {
+      throw new Error('queue required for paid extends');
+    }
+
+    const [tokenVaultPda] = getTokenVaultPda(SWTCH_MINT, programId);
+    const payerTokenAccount = getAssociatedTokenAddressSync(
+      SWTCH_MINT,
+      params.owner
+    );
+    const quoteAccount = getQuoteAccount(params.queue.pubkey);
+
+    const extendIx = await program.methods
+      .subscriptionExtend({
+        epochAmount: new BN(params.epochAmount),
+        adminExtend: false,
+      })
+      .accounts({
+        state: statePda,
+        subscription: subscriptionPda,
+        tier: tierPda,
+        payer: params.owner,
+        paymentMint: SWTCH_MINT,
+        payerTokenAccount,
+        tokenVault: tokenVaultPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        quoteAccount,
+        sysvars: {
+          clock: SYSVAR_CLOCK_PUBKEY,
+          slothashes: SYSVAR_SLOT_HASHES_PUBKEY,
+          instructions: SYSVAR_INSTRUCTIONS_PUBKEY,
+        },
+      })
+      .instruction();
+
+    return extendIx;
+  }
+}
+
+/**
+ * Build add team member instruction (does not send transaction)
+ *
+ * @example
+ * ```typescript
+ * const ix = await addTeamMemberIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   user: teamMemberPublicKey,
+ * });
+ * ```
+ */
+export async function addTeamMemberIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  user: PublicKey;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive PDAs
+  const [statePda] = getStatePda(programId);
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+
+  // Fetch subscription to get current tier
+  const subscription =
+    await program.account.subscription.fetch(subscriptionPda);
+  const currentTierId = subscription.tierId;
+  const [tierPda] = getTierPda(currentTierId, programId);
+
+  const addIx = await program.methods
+    .subscriptionManageUsers({
+      action: { add: {} },
+      user: params.user,
+    })
+    .accounts({
+      state: statePda,
+      subscription: subscriptionPda,
+      tier: tierPda,
+      owner: params.owner,
+    })
+    .instruction();
+
+  return addIx;
+}
+
+/**
+ * Build remove team member instruction (does not send transaction)
+ *
+ * @example
+ * ```typescript
+ * const ix = await removeTeamMemberIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   user: teamMemberPublicKey,
+ * });
+ * ```
+ */
+export async function removeTeamMemberIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  user: PublicKey;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive PDAs
+  const [statePda] = getStatePda(programId);
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+
+  // Fetch subscription to get current tier
+  const subscription =
+    await program.account.subscription.fetch(subscriptionPda);
+  const currentTierId = subscription.tierId;
+  const [tierPda] = getTierPda(currentTierId, programId);
+
+  const removeIx = await program.methods
+    .subscriptionManageUsers({
+      action: { remove: {} },
+      user: params.user,
+    })
+    .accounts({
+      state: statePda,
+      subscription: subscriptionPda,
+      tier: tierPda,
+      owner: params.owner,
+    })
+    .instruction();
+
+  return removeIx;
+}
+
+/**
+ * Build close subscription instruction (does not send transaction)
+ *
+ * @example
+ * ```typescript
+ * const ix = await closeSubscriptionIx({
+ *   connection,
+ *   owner: userPublicKey,
+ *   destination: userPublicKey,
+ * });
+ * ```
+ */
+export async function closeSubscriptionIx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  destination?: PublicKey;
+}): Promise<web3.TransactionInstruction> {
+  const programId = SUBSCRIPTION_PROGRAM_ID;
+  const program = await loadSubscriberProgram(params.connection, programId);
+
+  // Derive subscription PDA
+  const [subscriptionPda] = getSubscriptionPda(params.owner, programId);
+  const destination = params.destination || params.owner;
+
+  // Build close instruction
+  const closeIx = await program.methods
+    .subscriptionClose({})
+    .accounts({
+      subscription: subscriptionPda,
+      owner: params.owner,
+      destination,
+    })
+    .instruction();
+
+  return closeIx;
+}
+
+// ============================================================================
 // ADMIN SDK - Program Authority Functions
 // ============================================================================
 
