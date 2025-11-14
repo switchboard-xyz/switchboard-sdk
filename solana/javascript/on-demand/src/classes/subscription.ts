@@ -12,7 +12,7 @@ import { OracleQuote } from './oracleQuote.js';
 
 import { BN, Program, web3 } from '@coral-xyz/anchor-31';
 import {
-  createAssociatedTokenAccountInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
@@ -361,37 +361,8 @@ export async function createSubscription(
   );
   const quoteAccount = getQuoteAccount(params.queue.pubkey);
 
-  // Check if token account exists - create if needed (required by program even for free tier)
-  const ataInfo = await params.connection.getAccountInfo(payerTokenAccount);
-
-  if (!ataInfo) {
-    console.log('📝 Creating SWTCH token account (required by program)...');
-    const createAtaIx = createAssociatedTokenAccountInstruction(
-      params.payer.publicKey, // payer
-      payerTokenAccount, // ata
-      params.payer.publicKey, // owner
-      SWTCH_MINT // mint
-    );
-
-    // Send ATA creation in separate transaction first
-    const ataTx = new web3.Transaction().add(createAtaIx);
-    const latestBlockhash = await params.connection.getLatestBlockhash();
-    ataTx.recentBlockhash = latestBlockhash.blockhash;
-    ataTx.feePayer = params.payer.publicKey;
-    ataTx.partialSign(params.payer);
-
-    const ataSig = await params.connection.sendRawTransaction(
-      ataTx.serialize()
-    );
-    await params.connection.confirmTransaction({
-      signature: ataSig,
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    });
-    console.log(`✅ Token account created: ${ataSig.slice(0, 8)}...`);
-  }
-
   // Build subscription init instruction
+  // Note: Program will auto-create SWTCH token account if needed (init_if_needed)
   const subscriptionIx = await program.methods
     .subscriptionInit({
       tierId: params.tierId,
@@ -409,6 +380,7 @@ export async function createSubscription(
       payerTokenAccount,
       tokenVault: tokenVaultPda,
       tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
       quoteAccount,
       sysvars: {
@@ -959,6 +931,7 @@ export async function createSubscriptionIx(params: {
       payerTokenAccount,
       tokenVault: tokenVaultPda,
       tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
       quoteAccount,
       sysvars: {
