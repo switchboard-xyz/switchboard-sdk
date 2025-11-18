@@ -14,6 +14,18 @@ pub use self::pull_feed::PullFeed;
 pub mod secp256k1;
 pub use secp256k1::*;
 
+/// Signature-based authentication for Switchboard services
+pub mod signature_auth;
+pub use signature_auth::*;
+
+/// Subscription management for Switchboard On-Demand services
+pub mod subscription;
+pub use subscription::*;
+
+/// Real-time WebSocket streaming for price updates (Surge)
+pub mod surge;
+pub use surge::*;
+
 /// Lookup table ownership and management functionality
 pub mod lut_owner;
 pub use lut_owner::*;
