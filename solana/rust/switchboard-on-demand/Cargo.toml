@@ -1,6 +1,6 @@
 [package]
 name = "switchboard-on-demand"
-version = "0.10.8"
+version = "0.11.1"
 # docs.rs autobuild has difficulty with ahash dep. Host yuorself at https://tiiny.host/
 documentation = "https://docs.rs/switchboard-on-demand/latest/switchboard_on_demand"
 edition = "2021"
@@ -38,14 +38,14 @@ pid_override = []
 ## Client functionality for off-chain interactions (Gateway, Crossbar, transaction builders).
 ## Uses Solana SDK v2 with anchor-client compatibility.
 ## Includes: RPC client, transaction building, oracle feeds, and Crossbar integration.
-client = ["anchor-lang", "tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v2", "dep:solana-client-v2", "dep:solana-sdk-v2", "dep:chrono", "dep:futures-util", "dep:spl-associated-token-account", "dep:tokio-tungstenite", "dep:url"]
+client = ["anchor-lang", "tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v2", "dep:solana-account-decoder-v2", "dep:solana-client-v2", "dep:solana-sdk-v2", "dep:chrono", "dep:futures-util", "dep:spl-associated-token-account", "dep:tokio-tungstenite", "dep:url"]
 
 ## Alias for `client` feature - explicitly uses Solana SDK v2.
 client-v2 = ["client"]
 
 ## Client feature using Solana v3 crates.
 ## Uses v2 compat modules for types that haven't been published for v3 yet.
-client-v3 = ["tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v3", "dep:solana-client-v3", "dep:solana-sdk-v3", "dep:solana-sdk-v2"]
+client-v3 = ["tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v3", "dep:solana-account-decoder-v3", "dep:solana-client-v3", "dep:solana-sdk-v3", "dep:solana-sdk-v2"]
 
 ## Configures the crate for Solana devnet deployment.
 devnet = []
@@ -100,6 +100,8 @@ rust_decimal = "^1"
 serde = { version = "^1", features = ["derive"] }
 serde_json = { version = "1.0", optional = true }
 sha2 = "0.10.8"
+solana-account-decoder-v2 = { package = "solana-account-decoder", version = ">=2,<3", optional = true }
+solana-account-decoder-v3 = { package = "solana-account-decoder", version = ">=3", optional = true }
 solana-client-v2 = { package = "solana-client", version = ">=2,<3", optional = true }
 solana-client-v3 = { package = "solana-client", version = ">=3", optional = true }
 solana-program-v2 = { package = "solana-program", version = ">=2,<3", optional = true }

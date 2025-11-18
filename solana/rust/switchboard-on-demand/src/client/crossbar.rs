@@ -167,14 +167,28 @@ impl CrossbarClient {
             .context("Failed to send fetch request")?;
 
         let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
         if !status.is_success() {
             if self.verbose {
-                eprintln!("{}", resp.text().await.context("Failed to fetch response")?);
+                eprintln!("{}: {}", status, raw);
             }
-            return Err(anyhow!("Bad status code {}", status.as_u16()));
+            return Err(anyhow!(
+                "Bad status code {} for feed hash '{}'. Response: {}",
+                status.as_u16(),
+                feed_hash,
+                raw
+            ));
         }
 
-        resp.json().await.context("Failed to parse response")
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse fetch response for feed hash '{}'. URL: {}. Raw response (first 500 chars): {}",
+                feed_hash,
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
     }
 
     /// Store feed jobs in the crossbar gateway to a pinned IPFS address
@@ -200,18 +214,28 @@ impl CrossbarClient {
             .context("Failed to send store request")?;
 
         let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
         if !status.is_success() {
             if self.verbose {
-                eprintln!(
-                    "{}: {}",
-                    status,
-                    resp.text().await.context("Failed to fetch response")?
-                );
+                eprintln!("{}: {}", status, raw);
             }
-            return Err(anyhow!("Bad status code {}", status.as_u16()));
+            return Err(anyhow!(
+                "Bad status code {} for store request with queue '{}'. Response: {}",
+                status.as_u16(),
+                queue_address,
+                raw
+            ));
         }
 
-        resp.json().await.context("Failed to parse response")
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse store response for queue '{}'. URL: {}. Raw response (first 500 chars): {}",
+                queue_address,
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
     }
 
     pub async fn fetch_solana_updates(
@@ -226,30 +250,45 @@ impl CrossbarClient {
 
         let feeds_param: Vec<_> = feed_pubkeys.iter().map(|x| x.to_string()).collect();
         let feeds_param = feeds_param.join(",");
-        let network = cluster_type_to_string(network);
+        let network_str = cluster_type_to_string(network);
         let mut url = format!(
             "{}/updates/solana/{}/{}",
-            self.crossbar_url, network, feeds_param
+            self.crossbar_url, network_str, feeds_param
         );
         if let Some(num_signatures) = num_signatures {
             url.push_str(&format!("?numSignatures={}", num_signatures));
         }
 
-        let resp = self.client.get(&url).send().await?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send fetch solana updates request")?;
 
         let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
         if !status.is_success() {
             if self.verbose {
-                eprintln!(
-                    "{}: {}",
-                    status,
-                    resp.text().await.context("Failed to fetch response")?
-                );
+                eprintln!("{}: {}", status, raw);
             }
-            return Err(anyhow!("Bad status code {}", status.as_u16()));
+            return Err(anyhow!(
+                "Bad status code {} for Solana feeds on network '{}'. Response: {}",
+                status.as_u16(),
+                network_str,
+                raw
+            ));
         }
 
-        resp.json().await.context("Failed to parse response")
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse fetch_solana_updates response for feeds on network '{}'. URL: {}. Raw response (first 500 chars): {}",
+                network_str,
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
     }
 
     /// Simulate feed responses from the crossbar gateway for Solana feeds.
@@ -317,19 +356,28 @@ impl CrossbarClient {
             .context("Failed to send simulate feeds request")?;
 
         let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
         if !status.is_success() {
             if self.verbose {
-                eprintln!(
-                    "{}: {}",
-                    status,
-                    resp.text().await.context("Failed to fetch response")?
-                );
+                eprintln!("{}: {}", status, raw);
             }
-            return Err(anyhow!("Bad status code {}", status.as_u16()));
+            return Err(anyhow!(
+                "Bad status code {} for feeds [{}]. Response: {}",
+                status.as_u16(),
+                feed_hashes.join(", "),
+                raw
+            ));
         }
 
-        let mut responses: Vec<SimulateFeedsResponse> =
-            resp.json().await.context("Failed to parse response")?;
+        let mut responses: Vec<SimulateFeedsResponse> = serde_json::from_str(&raw)
+            .with_context(|| format!(
+                "Failed to parse simulate_feeds response for feeds [{}]. URL: {}. Raw response (first 500 chars): {}",
+                feed_hashes.join(", "),
+                url,
+                &raw.chars().take(500).collect::<String>()
+            ))?;
+
         // Compute the median result for each response
         for response in responses.iter_mut() {
             response.result = median(response.results.clone()).expect("Failed to compute median");
@@ -364,21 +412,29 @@ impl CrossbarClient {
             .send()
             .await
             .context("Failed to send fetch Sui updates request")?;
+
         let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
         if !status.is_success() {
             if self.verbose {
-                eprintln!(
-                    "{}: {}",
-                    status,
-                    resp.text().await.context("Failed to fetch response text")?
-                );
+                eprintln!("{}: {}", status, raw);
             }
-            return Err(anyhow!("Bad status code {}", status.as_u16()));
+            return Err(anyhow!(
+                "Bad status code {} for Sui feeds on network '{}'. Response: {}",
+                status.as_u16(),
+                network,
+                raw
+            ));
         }
-        let mut update_response: FetchSuiUpdatesResponse = resp
-            .json()
-            .await
-            .context("Failed to parse fetch Sui updates response")?;
+
+        let mut update_response: FetchSuiUpdatesResponse = serde_json::from_str(&raw)
+            .with_context(|| format!(
+                "Failed to parse fetch_sui_updates response for feeds on network '{}'. URL: {}. Raw response (first 500 chars): {}",
+                network,
+                url,
+                &raw.chars().take(500).collect::<String>()
+            ))?;
 
         // If the server did not include aggregator_id or it is empty,
         // and if the number of responses matches the number of aggregator_addresses,
@@ -527,14 +583,28 @@ impl CrossbarClient {
             .context("Failed to send fetch gateways request")?;
 
         let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
         if !status.is_success() {
             if self.verbose {
-                eprintln!("{}: {}", status, resp.text().await.context("Failed to fetch response")?);
+                eprintln!("{}: {}", status, raw);
             }
-            return Err(anyhow!("Bad status code {}", status.as_u16()));
+            return Err(anyhow!(
+                "Bad status code {} for fetch gateways on network '{}'. Response: {}",
+                status.as_u16(),
+                network,
+                raw
+            ));
         }
 
-        resp.json().await.context("Failed to parse gateways response")
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse fetch_gateways response for network '{}'. URL: {}. Raw response (first 500 chars): {}",
+                network,
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
     }
 
 }

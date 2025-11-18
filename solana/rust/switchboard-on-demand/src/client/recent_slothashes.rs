@@ -2,6 +2,7 @@ use anyhow::Context;
 use anyhow::Error as AnyhowError;
 use arrayref::array_ref;
 use bytemuck;
+use crate::solana_compat::solana_account_decoder::UiAccountEncoding;
 use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
 #[cfg(not(feature = "client-v3"))]
 use crate::solana_compat::solana_client::rpc_config::RpcAccountInfoConfig;
@@ -33,12 +34,14 @@ impl SlotHashSysvar {
             use crate::solana_compat::solana_client::rpc_config::RpcAccountInfoConfig as RpcConfig;
             RpcConfig {
                 commitment: crate::solana_compat::solana_client::rpc_config::RpcContextConfig::default().commitment,
+                encoding: Some(UiAccountEncoding::Base64),
                 ..Default::default()
             }
         };
         #[cfg(not(feature = "client-v3"))]
         let config = RpcAccountInfoConfig {
             commitment: Some(CommitmentConfig::confirmed()),
+            encoding: Some(UiAccountEncoding::Base64),
             ..Default::default()
         };
         let slots_data = client

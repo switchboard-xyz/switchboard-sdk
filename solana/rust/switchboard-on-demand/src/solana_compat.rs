@@ -105,6 +105,17 @@ pub use solana_client_v3 as solana_client;
 #[cfg(all(feature = "client", not(feature = "client-v3")))]
 pub use solana_client_v2 as solana_client;
 
+// ===== solana_account_decoder (when client or client-v3 is enabled) =====
+// Version-specific solana-account-decoder selection based on features
+
+// When client-v3 is enabled, use solana-account-decoder v3
+#[cfg(feature = "client-v3")]
+pub use solana_account_decoder_v3 as solana_account_decoder;
+
+// When client is enabled (default v2), use solana-account-decoder v2
+#[cfg(all(feature = "client", not(feature = "client-v3")))]
+pub use solana_account_decoder_v2 as solana_account_decoder;
+
 // Re-export common types for easier access
 pub use solana_program::{
     account_info::AccountInfo,
