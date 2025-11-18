@@ -10,10 +10,26 @@ use tokio::sync::{mpsc, RwLock, Mutex};
 use tokio::time::{sleep, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, WebSocketStream, MaybeTlsStream};
 use url::Url;
+use base64::Engine;
 
 type WsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// Raw gateway response structure (matches actual BundledFeedUpdate from server)
+/// Raw gateway response structure from Switchboard On-Demand oracles.
+///
+/// This structure matches the actual `BundledFeedUpdate` message format returned
+/// by Switchboard gateway servers. It contains oracle-signed price data along with
+/// metadata about the update trigger and timing.
+///
+/// # Fields
+///
+/// * `type_` - Message type identifier (typically "BundledFeedUpdate")
+/// * `feed_quote_id` - Optional unique identifier for this quote/feed bundle
+/// * `feed_values` - Array of feed price values and their hashes
+/// * `oracle_response` - Oracle signature and verification data
+/// * `source_ts_ms` - Timestamp from the exchange data source (milliseconds since epoch)
+/// * `seen_at_ts_ms` - Timestamp when the gateway received the data (milliseconds since epoch)
+/// * `triggered_on_price_change` - `true` if triggered by price movement, `false` for heartbeat
+/// * `message` - Optional message or error information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawGatewayResponse {
     #[serde(rename = "type")]
@@ -28,12 +44,36 @@ pub struct RawGatewayResponse {
     pub message: Option<String>,
 }
 
+/// A single feed's price value and identifier.
+///
+/// # Fields
+///
+/// * `value` - Raw price value in 18-decimal fixed-point format (e.g., "100500000000000000000" = $100.50)
+/// * `feed_hash` - Hexadecimal feed hash identifier (without '0x' prefix)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedValue {
     pub value: String,
     pub feed_hash: String,
 }
 
+/// Oracle signature and verification data.
+///
+/// Contains cryptographic signatures and metadata required to verify oracle data on-chain.
+/// Supports both Ed25519 and Secp256k1 signature schemes.
+///
+/// # Fields
+///
+/// * `oracle_pubkey` - Oracle's Solana public key
+/// * `eth_address` - Oracle's Ethereum address (for Secp256k1)
+/// * `signature` - Base64-encoded signature over the checksum
+/// * `checksum` - Base64-encoded hash of the signed data
+/// * `recovery_id` - ECDSA recovery ID (for Secp256k1)
+/// * `oracle_idx` - Index of this oracle in the queue's oracle list
+/// * `timestamp` - Signature timestamp in seconds since epoch
+/// * `timestamp_ms` - Optional signature timestamp in milliseconds (more precise)
+/// * `recent_hash` - Recent blockhash for replay protection
+/// * `slot` - Solana slot number when the signature was created
+/// * `ed25519_enclave_signer` - Optional Ed25519 public key from secure enclave (hex format)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OracleResponse {
     pub oracle_pubkey: String,
@@ -140,7 +180,43 @@ pub struct SessionResponse {
     pub ws_url: String,
 }
 
-/// Oracle response class that wraps raw gateway responses with convenient methods
+/// High-level wrapper for oracle price updates from Switchboard On-Demand.
+///
+/// `SurgeUpdate` provides a convenient interface for working with oracle-signed price data
+/// from Switchboard gateways. It wraps the raw gateway response and offers methods for:
+/// - Converting updates to Solana instructions for on-chain verification
+/// - Extracting and formatting price values
+/// - Analyzing latency and performance metrics
+/// - Checking update trigger conditions (price change vs heartbeat)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use switchboard_on_demand::prelude::*;
+///
+/// // Receive an update from the gateway
+/// let surge_update = SurgeUpdate::new(raw_gateway_response);
+///
+/// // Extract formatted prices
+/// let prices = surge_update.get_formatted_prices();
+/// for (feed_hash, price) in prices {
+///     println!("Feed {}: {}", feed_hash, price);
+/// }
+///
+/// // Create on-chain verification instructions
+/// let instructions = surge_update.to_quote_ix(
+///     queue_pubkey,
+///     payer,
+///     0, // instruction_idx
+/// )?;
+///
+/// // Check performance metrics
+/// let metrics = surge_update.get_latency_metrics();
+/// match metrics.end_to_end {
+///     LatencyValue::Ms(ms) => println!("Latency: {}ms", ms),
+///     LatencyValue::ClockDrift(drift) => eprintln!("Clock drift: {}ms", drift),
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct SurgeUpdate {
     raw_response: RawGatewayResponse,
@@ -148,19 +224,194 @@ pub struct SurgeUpdate {
 
 #[cfg(feature = "client")]
 use crate::Instruction;
+
+// Ed25519 instruction format constants
+const ED25519_SIGNATURE_SERIALIZED_SIZE: usize = 64;
+const ED25519_PUBKEY_SERIALIZED_SIZE: usize = 32;
+const ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE: usize = 14;
+const OFFSET_FIELD_SIZE: usize = 2;
+const SLOT_SIZE: usize = 8;
+const VERSION_SIZE: usize = 1;
+const ORACLE_INDEX_SIZE: usize = 1;
+const PADDING_SIZE: usize = 1;
+
 #[cfg(feature = "client")]
-use crate::solana_sdk::ed25519_instruction;
+/// Build a custom Ed25519 signature verification instruction for Switchboard On-Demand.
+///
+/// This creates an Ed25519 signature verification instruction that includes additional
+/// metadata (slot, version, oracle index) required by the Switchboard On-Demand protocol.
+/// The instruction format matches the JavaScript `buildEd25519Instruction` implementation.
+///
+/// # Instruction Format
+///
+/// The instruction data is structured as follows:
+/// ```text
+/// [0-1]     Header (num_signatures + padding)
+/// [2-15]    Signature offsets (14 bytes)
+/// [16-79]   Signature data (64 bytes)
+/// [80-111]  Public key data (32 bytes)
+/// [112-N]   Message data (variable length)
+/// [N+1]     Oracle index (1 byte)
+/// [N+2-N+9] Recent slot (8 bytes, little-endian u64)
+/// [N+10]    Version (1 byte)
+/// [N+11-N+14] "SBOD" discriminator (4 bytes)
+/// ```
+///
+/// # Arguments
+///
+/// * `pubkey` - Ed25519 public key (32 bytes) that signed the message
+/// * `signature` - Ed25519 signature (64 bytes) over the message
+/// * `message` - The message that was signed (typically the oracle checksum)
+/// * `oracle_idx` - Index of the oracle in the queue's oracle list
+/// * `instruction_idx` - Index of this instruction in the transaction
+/// * `recent_slot` - Recent slot number for replay protection
+/// * `version` - Protocol version (0 for Ed25519 v0 scheme)
+///
+/// # Returns
+///
+/// Returns an `Instruction` targeting the Ed25519 program with the properly formatted
+/// verification data, or an `SbError` if construction fails.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let ed25519_ix = build_ed25519_instruction(
+///     &pubkey_array,
+///     &signature_array,
+///     &message_bytes,
+///     oracle_idx,
+///     0, // instruction_idx
+///     recent_slot,
+///     0, // version 0 for Ed25519 v0 scheme
+/// )?;
+/// ```
+fn build_ed25519_instruction(
+    pubkey: &[u8; 32],
+    signature: &[u8; 64],
+    message: &[u8],
+    oracle_idx: u8,
+    instruction_idx: u16,
+    recent_slot: u64,
+    version: u8,
+) -> Result<Instruction, SbError> {
+    let common_message_size = message.len();
+
+    // Calculate offsets (matching JavaScript implementation)
+    let signature_offsets_start = OFFSET_FIELD_SIZE; // Includes padding byte
+    let data_start = ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE + signature_offsets_start; // 14 + 2 = 16
+
+    let signature_offset = data_start; // 16
+    let pubkey_offset = signature_offset + ED25519_SIGNATURE_SERIALIZED_SIZE; // 16 + 64 = 80
+    let message_offset = pubkey_offset + ED25519_PUBKEY_SERIALIZED_SIZE; // 80 + 32 = 112
+
+    // Build signature offsets (14 bytes)
+    let mut offsets_bytes = Vec::with_capacity(ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE);
+    offsets_bytes.extend_from_slice(&(signature_offset as u16).to_le_bytes()); // signature offset
+    offsets_bytes.extend_from_slice(&instruction_idx.to_le_bytes()); // signature instruction index
+    offsets_bytes.extend_from_slice(&(pubkey_offset as u16).to_le_bytes()); // pubkey offset
+    offsets_bytes.extend_from_slice(&instruction_idx.to_le_bytes()); // pubkey instruction index
+    offsets_bytes.extend_from_slice(&(message_offset as u16).to_le_bytes()); // message offset
+    offsets_bytes.extend_from_slice(&(common_message_size as u16).to_le_bytes()); // message size
+    offsets_bytes.extend_from_slice(&instruction_idx.to_le_bytes()); // message instruction index
+
+    // Calculate total size: message_offset + message + oracle_idx + slot + version + discriminator
+    let num_signatures = 1usize;
+    let appended_size = SLOT_SIZE + VERSION_SIZE + 4; // slot (8) + version (1) + "SBOD" (4)
+    let total_size = message_offset + common_message_size + num_signatures + appended_size;
+
+    let mut instr_data = vec![0u8; total_size];
+    let mut position = 0;
+
+    // 1. Write count byte (number of signatures)
+    instr_data[position] = num_signatures as u8;
+    position += ORACLE_INDEX_SIZE;
+
+    // 2. Write padding byte
+    instr_data[position] = 0;
+    position += PADDING_SIZE;
+
+    // 3. Write offsets area
+    instr_data[position..position + ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE]
+        .copy_from_slice(&offsets_bytes);
+    position += ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE;
+
+    // 4. Write signature at correct offset (should be at position 16)
+    assert_eq!(position, signature_offset);
+    instr_data[signature_offset..signature_offset + ED25519_SIGNATURE_SERIALIZED_SIZE]
+        .copy_from_slice(signature);
+
+    // 5. Write pubkey at correct offset (should be at position 80)
+    instr_data[pubkey_offset..pubkey_offset + ED25519_PUBKEY_SERIALIZED_SIZE]
+        .copy_from_slice(pubkey);
+
+    // 6. Write message at correct offset (should be at position 112)
+    instr_data[message_offset..message_offset + common_message_size].copy_from_slice(message);
+
+    // 7. Append oracle index
+    let oracle_idx_offset = message_offset + common_message_size;
+    instr_data[oracle_idx_offset] = oracle_idx;
+
+    // 8. Append recent_slot (8 bytes, little-endian u64)
+    let slot_offset = oracle_idx_offset + num_signatures;
+    instr_data[slot_offset..slot_offset + SLOT_SIZE].copy_from_slice(&recent_slot.to_le_bytes());
+
+    // 9. Append version (1 byte)
+    let version_offset = slot_offset + SLOT_SIZE;
+    instr_data[version_offset] = version;
+
+    // 10. Append "SBOD" discriminator
+    let discriminator_offset = version_offset + VERSION_SIZE;
+    instr_data[discriminator_offset..discriminator_offset + 4].copy_from_slice(b"SBOD");
+
+    Ok(Instruction {
+        program_id: crate::solana_compat::ed25519_program::ID,
+        accounts: vec![],
+        data: instr_data,
+    })
+}
 
 impl SurgeUpdate {
+    /// Create a new `SurgeUpdate` from a raw gateway response.
+    ///
+    /// # Arguments
+    ///
+    /// * `raw_response` - The raw response structure from the Switchboard gateway
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let surge_update = SurgeUpdate::new(raw_gateway_response);
+    /// ```
     pub fn new(raw_response: RawGatewayResponse) -> Self {
         Self { raw_response }
     }
 
+    /// Get a reference to the underlying raw gateway response data.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the `RawGatewayResponse` containing all oracle data.
     pub fn data(&self) -> &RawGatewayResponse {
         &self.raw_response
     }
 
-    /// Get array of signed feed hashes
+    /// Get an array of feed hashes included in this oracle update.
+    ///
+    /// Feed hashes uniquely identify price feeds and are used to derive oracle account PDAs.
+    ///
+    /// # Returns
+    ///
+    /// A vector of feed hash strings (hex format without '0x' prefix), or an empty vector
+    /// if no feed values are present.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let feed_hashes = surge_update.get_signed_feeds();
+    /// for hash in feed_hashes {
+    ///     println!("Feed hash: {}", hash);
+    /// }
+    /// ```
     pub fn get_signed_feeds(&self) -> Vec<String> {
         self.raw_response
             .feed_values
@@ -169,7 +420,26 @@ impl SurgeUpdate {
             .unwrap_or_default()
     }
 
-    /// Get array of price values (raw 18-decimal format)
+    /// Get an array of raw price values in 18-decimal fixed-point format.
+    ///
+    /// Values are returned as strings to preserve precision. Each value represents
+    /// a price multiplied by 10^18 (e.g., "$100.50" = "100500000000000000000").
+    ///
+    /// # Returns
+    ///
+    /// A vector of value strings in 18-decimal format, or an empty vector if no
+    /// feed values are present.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let values = surge_update.get_values();
+    /// for value in values {
+    ///     let price_u128 = value.parse::<u128>()?;
+    ///     let price_decimal = price_u128 as f64 / 1e18;
+    ///     println!("Price: ${:.2}", price_decimal);
+    /// }
+    /// ```
     pub fn get_values(&self) -> Vec<String> {
         self.raw_response
             .feed_values
@@ -178,7 +448,25 @@ impl SurgeUpdate {
             .unwrap_or_default()
     }
 
-    /// Get formatted prices as readable dollar amounts
+    /// Get formatted prices as human-readable dollar amounts with comma separators.
+    ///
+    /// Converts raw 18-decimal values into formatted strings like "$1,234.56".
+    /// Trailing zeros after the decimal point are trimmed.
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` mapping feed hashes to formatted price strings. If a value
+    /// cannot be parsed, it is omitted from the map.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let prices = surge_update.get_formatted_prices();
+    /// for (feed_hash, price) in prices {
+    ///     println!("Feed {}: {}", feed_hash, price);
+    ///     // Output: "Feed abc123...: $1,234.567"
+    /// }
+    /// ```
     pub fn get_formatted_prices(&self) -> HashMap<String, String> {
         let mut prices = HashMap::new();
 
@@ -212,17 +500,72 @@ impl SurgeUpdate {
         prices
     }
 
-    /// Check if this update was triggered by a price change (vs heartbeat)
+    /// Check if this update was triggered by a price change versus a scheduled heartbeat.
+    ///
+    /// Switchboard oracles can trigger updates in two ways:
+    /// - **Price change**: When the price moves beyond a configured threshold
+    /// - **Heartbeat**: Periodic updates to ensure freshness even without price movement
+    ///
+    /// # Returns
+    ///
+    /// `true` if this update was triggered by a price change, `false` if it was a heartbeat.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// if surge_update.is_triggered_by_price_change() {
+    ///     println!("Price moved significantly!");
+    /// } else {
+    ///     println!("Regular heartbeat update");
+    /// }
+    /// ```
     pub fn is_triggered_by_price_change(&self) -> bool {
         self.raw_response.triggered_on_price_change
     }
 
-    /// Get the complete raw response from gateway
+    /// Get a reference to the complete raw gateway response.
+    ///
+    /// This provides access to all fields in the gateway response, including
+    /// oracle signatures, feed values, timestamps, and metadata.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the `RawGatewayResponse` structure.
     pub fn get_raw_response(&self) -> &RawGatewayResponse {
         &self.raw_response
     }
 
-    /// Get detailed latency breakdown for this oracle response
+    /// Calculate detailed latency metrics for this oracle response.
+    ///
+    /// Provides a breakdown of timing from the exchange data source through the oracle
+    /// network to the client. Helps identify bottlenecks and monitor oracle performance.
+    ///
+    /// # Metrics Returned
+    ///
+    /// - **exchange_to_oracle_update**: Time from exchange timestamp to oracle signature
+    /// - **oracle_update_to_client**: Time from oracle signature to client receipt
+    /// - **end_to_end**: Total time from exchange timestamp to client receipt
+    /// - **is_scheduled_price_heartbeat**: Whether this was a heartbeat vs price-triggered update
+    ///
+    /// # Clock Drift Handling
+    ///
+    /// If the client or oracle clocks are not synchronized, some metrics may show negative
+    /// values. These are reported as `LatencyValue::ClockDrift(i64)` instead of
+    /// `LatencyValue::Ms(u64)` to help identify timing issues.
+    ///
+    /// # Returns
+    ///
+    /// A `LatencyMetrics` structure with timing breakdowns.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let metrics = surge_update.get_latency_metrics();
+    /// match metrics.end_to_end {
+    ///     LatencyValue::Ms(ms) => println!("End-to-end latency: {}ms", ms),
+    ///     LatencyValue::ClockDrift(drift) => println!("Clock drift detected: {}ms", drift),
+    /// }
+    /// ```
     pub fn get_latency_metrics(&self) -> LatencyMetrics {
         let source_time_ms = self.raw_response.source_ts_ms;
         let arrival_time_ms = chrono::Utc::now().timestamp_millis() as u64;
@@ -252,59 +595,163 @@ impl SurgeUpdate {
         }
     }
 
-    /// Convert to Solana instruction for quote verification
-    /// Returns the Ed25519 signature verification instruction
+    /// Convert the surge update to Solana instructions for on-chain quote verification.
+    ///
+    /// This method creates the necessary instructions to verify and update oracle quotes on-chain
+    /// using the Switchboard On-Demand protocol. It returns two instructions that must be executed
+    /// in order within the same transaction.
+    ///
+    /// # Instruction Flow
+    ///
+    /// 1. **Ed25519 Verification Instruction**: Verifies the oracle's Ed25519 signature over
+    ///    the checksum. This instruction is processed by Solana's native Ed25519 program and
+    ///    makes the verification result available in the Instructions sysvar.
+    ///
+    /// 2. **Quote Program Update Instruction**: Updates the on-chain oracle quote account with
+    ///    the verified data. This instruction reads the Ed25519 verification result from the
+    ///    Instructions sysvar to ensure the signature is valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `queue_pubkey` - The public key of the Switchboard queue that authorized this oracle.
+    ///   Used as the first seed for deriving the canonical oracle account PDA.
+    ///
+    /// * `payer` - The public key of the transaction payer. This account will pay for any
+    ///   rent required to create or expand the oracle quote account, and must sign the transaction.
+    ///
+    /// * `instruction_idx` - The zero-based index where the Ed25519 verification instruction
+    ///   will appear in the transaction. The quote program instruction must appear immediately
+    ///   after at `instruction_idx + 1`. Usually 0 for single-operation transactions.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<Instruction>` containing exactly two instructions in order:
+    /// 1. Ed25519 signature verification instruction
+    /// 2. Quote program `verified_update` instruction
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - No oracle response is available in the surge update
+    /// - Ed25519 enclave signer is not present in the oracle response
+    /// - Signature or checksum cannot be decoded from base64
+    /// - Public key, signature, or message have invalid lengths
+    /// - No feed values are available in the oracle response
+    /// - Feed hashes cannot be decoded from hexadecimal
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use switchboard_on_demand::prelude::*;
+    ///
+    /// // Assume we have a SurgeUpdate from a gateway response
+    /// let surge_update: SurgeUpdate = gateway.fetch_update(&feed_ids).await?;
+    ///
+    /// let queue_pubkey = Pubkey::from_str("...")?;
+    /// let payer = payer_keypair.pubkey();
+    ///
+    /// // Create the verification instructions
+    /// let instructions = surge_update.to_quote_ix(queue_pubkey, payer, 0)?;
+    ///
+    /// // Build and send the transaction
+    /// let transaction = Transaction::new_signed_with_payer(
+    ///     &instructions,
+    ///     Some(&payer),
+    ///     &[&payer_keypair],
+    ///     recent_blockhash,
+    /// );
+    ///
+    /// client.send_and_confirm_transaction(&transaction).await?;
+    /// ```
+    ///
+    /// # Protocol Details
+    ///
+    /// The canonical oracle account is derived as a PDA using:
+    /// - Seeds: `[queue_pubkey, feed_hash_1, feed_hash_2, ..., feed_hash_n]`
+    /// - Program: Quote Program ID (`orac1eFjzWL5R3RbbdMV68K9H6TaCVVcL6LjvQQWAbz`)
+    ///
+    /// The Ed25519 instruction includes:
+    /// - Oracle's Ed25519 public key (32 bytes)
+    /// - Signature over the checksum (64 bytes)
+    /// - The checksum message (32 bytes)
+    /// - Oracle index, recent slot, version, and "SBOD" discriminator
+    ///
+    /// The quote program instruction requires these accounts:
+    /// - Queue account (read-only)
+    /// - Oracle quote account (writable, may be created)
+    /// - Instructions sysvar (read-only, for Ed25519 verification)
+    /// - Slot hashes sysvar (read-only, for replay protection)
+    /// - Clock sysvar (read-only, for timestamp validation)
+    /// - Payer (writable, signer, pays for account creation)
+    /// - System program (read-only, for account creation)
     #[cfg(feature = "client")]
-    pub fn to_quote_ix(&self, _instruction_idx: u16) -> Result<Instruction, SbError> {
+    pub fn to_quote_ix(
+        &self,
+        queue_pubkey: crate::Pubkey,
+        payer: crate::Pubkey,
+        instruction_idx: u16,
+    ) -> Result<Vec<Instruction>, SbError> {
         let oracle_response = self
             .raw_response
             .oracle_response
             .as_ref()
             .ok_or_else(|| SbError::CustomError {
-                message: "No oracle response available".to_string(),
+                message: "No oracle response available for creating signatures".to_string(),
                 source: Arc::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Missing oracle response",
                 )),
             })?;
 
-        // Check if using Ed25519 signature scheme
-        if let Some(ed25519_signer) = &oracle_response.ed25519_enclave_signer {
-            // Extract Ed25519 public key (first 32 bytes if 64-byte key)
-            let pubkey_hex = if ed25519_signer.len() == 128 {
-                &ed25519_signer[..64] // First 32 bytes (64 hex chars)
-            } else {
-                ed25519_signer.as_str()
-            };
+        // Check if Ed25519 enclave signer exists
+        let ed25519_signer = oracle_response.ed25519_enclave_signer.as_ref().ok_or_else(|| {
+            SbError::CustomError {
+                message: "Ed25519 enclave signer not available in oracle response".to_string(),
+                source: Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Missing Ed25519 enclave signer",
+                )),
+            }
+        })?;
 
-            let pubkey_bytes = hex::decode(pubkey_hex).map_err(|e| SbError::CustomError {
-                message: format!("Failed to decode Ed25519 pubkey: {}", e),
+        // Extract Ed25519 public key (first 32 bytes if 64-byte key)
+        let pubkey_hex = if ed25519_signer.len() == 128 {
+            &ed25519_signer[..64] // First 32 bytes (64 hex chars)
+        } else {
+            ed25519_signer.as_str()
+        };
+
+        let pubkey_bytes = hex::decode(pubkey_hex).map_err(|e| SbError::CustomError {
+            message: format!("Failed to decode Ed25519 pubkey: {}", e),
+            source: Arc::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+        })?;
+
+        let signature_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&oracle_response.signature)
+            .map_err(|e| SbError::CustomError {
+                message: format!("Failed to decode signature: {}", e),
                 source: Arc::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
             })?;
 
-            let signature_bytes =
-                base64::decode(&oracle_response.signature).map_err(|e| SbError::CustomError {
-                    message: format!("Failed to decode signature: {}", e),
-                    source: Arc::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                })?;
-
-            let message_bytes =
-                base64::decode(&oracle_response.checksum).map_err(|e| SbError::CustomError {
-                    message: format!("Failed to decode message: {}", e),
-                    source: Arc::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-                })?;
-
-            // Create Ed25519 instruction with signature
-            // Convert bytes to fixed-size arrays
-            let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|_| SbError::CustomError {
-                message: "Invalid Ed25519 public key length".to_string(),
-                source: Arc::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Expected 32 bytes",
-                )),
+        let message_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&oracle_response.checksum)
+            .map_err(|e| SbError::CustomError {
+                message: format!("Failed to decode checksum: {}", e),
+                source: Arc::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
             })?;
 
-            let signature_array: [u8; 64] = signature_bytes.try_into().map_err(|_| SbError::CustomError {
+        // Convert bytes to fixed-size arrays
+        let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|_| SbError::CustomError {
+            message: "Invalid Ed25519 public key length".to_string(),
+            source: Arc::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Expected 32 bytes",
+            )),
+        })?;
+
+        let signature_array: [u8; 64] = signature_bytes
+            .try_into()
+            .map_err(|_| SbError::CustomError {
                 message: "Invalid Ed25519 signature length".to_string(),
                 source: Arc::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -312,39 +759,138 @@ impl SurgeUpdate {
                 )),
             })?;
 
-            let message_array: [u8; 32] = message_bytes.try_into().map_err(|_| SbError::CustomError {
-                message: "Invalid Ed25519 message hash length".to_string(),
+        // Build the Ed25519 instruction with slot and version
+        let ed25519_instruction = build_ed25519_instruction(
+            &pubkey_array,
+            &signature_array,
+            &message_bytes,
+            oracle_response.oracle_idx,
+            instruction_idx,
+            oracle_response.slot,
+            0, // version 0 for Ed25519 v0 scheme
+        )?;
+
+        // Get feed hashes from the response
+        let feed_hashes: Vec<String> = self
+            .raw_response
+            .feed_values
+            .as_ref()
+            .map(|feeds| {
+                feeds
+                    .iter()
+                    .map(|feed| format!("0x{}", feed.feed_hash))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if feed_hashes.is_empty() {
+            return Err(SbError::CustomError {
+                message: "No feed values available in oracle response".to_string(),
                 source: Arc::new(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "Expected 32 bytes",
+                    "Missing feed values",
                 )),
-            })?;
-
-            let ix = ed25519_instruction::new_ed25519_instruction_with_signature(
-                &pubkey_array,
-                &signature_array,
-                &message_array,
-            );
-
-            Ok(ix)
-        } else {
-            // Secp256k1 path - would need secp256k1_instruction
-            Err(SbError::CustomError {
-                message: "Secp256k1 instruction conversion not yet implemented".to_string(),
-                source: Arc::new(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "Use Ed25519 signature scheme",
-                )),
-            })
+            });
         }
+
+        // Derive the canonical oracle account from feed hashes
+        let feed_ids: Result<Vec<[u8; 32]>, SbError> = feed_hashes
+            .iter()
+            .map(|hash_str| {
+                let hash_str = hash_str.strip_prefix("0x").unwrap_or(hash_str);
+                let bytes = hex::decode(hash_str).map_err(|e| SbError::CustomError {
+                    message: format!("Failed to decode feed hash: {}", e),
+                    source: Arc::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+                })?;
+                bytes.try_into().map_err(|_| SbError::CustomError {
+                    message: "Invalid feed hash length".to_string(),
+                    source: Arc::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "Expected 32 bytes",
+                    )),
+                })
+            })
+            .collect();
+
+        let feed_ids = feed_ids?;
+
+        let feed_id_refs: Vec<&[u8; 32]> = feed_ids.iter().collect();
+        let (oracle_account, bump) = crate::Pubkey::find_program_address(
+            &{
+                let mut seeds: Vec<&[u8]> = vec![queue_pubkey.as_ref()];
+                for id in &feed_id_refs {
+                    seeds.push(id.as_ref());
+                }
+                seeds
+            },
+            &crate::QUOTE_PROGRAM_ID,
+        );
+
+        // Create the quote program verified_update instruction
+        use crate::solana_compat::{sysvar, AccountMeta};
+        let quote_program_ix = Instruction {
+            program_id: crate::QUOTE_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(queue_pubkey, false),   // queue_account [0]
+                AccountMeta::new(oracle_account, false),          // oracle_account [1]
+                AccountMeta::new_readonly(sysvar::instructions::ID, false), // ix_sysvar [2]
+                AccountMeta::new_readonly(sysvar::slot_hashes::ID, false),  // slot_sysvar [3]
+                AccountMeta::new_readonly(sysvar::clock::ID, false),        // clock_sysvar [4]
+                AccountMeta::new(payer, true),                    // payer [5]
+                AccountMeta::new_readonly(crate::solana_compat::solana_program::system_program::ID, false), // system_program [6]
+            ],
+            data: vec![0u8, instruction_idx as u8, bump], // [opcode, ix_idx, bump]
+        };
+
+        Ok(vec![ed25519_instruction, quote_program_ix])
     }
 
-    /// Get the feed quote ID if available
+    /// Get the quote ID (feed bundle ID) if available.
+    ///
+    /// The quote ID uniquely identifies a specific quote or feed bundle. This is used
+    /// for tracking and correlating oracle responses across different parts of the system.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<&str>` containing the quote ID if present, or `None` if not available.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// if let Some(quote_id) = surge_update.get_quote_id() {
+    ///     println!("Quote ID: {}", quote_id);
+    /// }
+    /// ```
     pub fn get_quote_id(&self) -> Option<&str> {
         self.raw_response.feed_quote_id.as_deref()
     }
 }
 
+/// Detailed latency metrics for oracle data flow.
+///
+/// Tracks timing at each stage from exchange data source through oracle signing
+/// to client receipt. Useful for performance monitoring and debugging.
+///
+/// # Fields
+///
+/// * `exchange_to_oracle_update` - Time from exchange timestamp to oracle signature creation
+/// * `oracle_update_to_client` - Time from oracle signature to client receipt
+/// * `end_to_end` - Total time from exchange timestamp to client receipt
+/// * `is_scheduled_price_heartbeat` - `true` if this was a heartbeat update, `false` if price-triggered
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let metrics = surge_update.get_latency_metrics();
+/// println!("Is heartbeat: {}", metrics.is_scheduled_price_heartbeat);
+///
+/// match metrics.end_to_end {
+///     LatencyValue::Ms(ms) => println!("Total latency: {}ms", ms),
+///     LatencyValue::ClockDrift(drift) => {
+///         println!("Warning: Clock drift detected: {}ms", drift);
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct LatencyMetrics {
     pub exchange_to_oracle_update: LatencyValue,
@@ -353,9 +899,35 @@ pub struct LatencyMetrics {
     pub is_scheduled_price_heartbeat: bool,
 }
 
+/// Represents a latency measurement that may indicate clock drift.
+///
+/// Oracle latency measurements can sometimes show negative values if clocks
+/// are not synchronized between the client, oracle, and exchange systems.
+/// This enum distinguishes between valid latency measurements and potential
+/// clock synchronization issues.
+///
+/// # Variants
+///
+/// * `Ms(u64)` - A valid latency measurement in milliseconds
+/// * `ClockDrift(i64)` - Indicates potential clock drift (negative value)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// match latency_value {
+///     LatencyValue::Ms(ms) if ms < 100 => println!("Excellent latency: {}ms", ms),
+///     LatencyValue::Ms(ms) if ms < 500 => println!("Good latency: {}ms", ms),
+///     LatencyValue::Ms(ms) => println!("High latency: {}ms", ms),
+///     LatencyValue::ClockDrift(drift) => {
+///         eprintln!("Clock drift detected: {}ms - check system time sync", drift);
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub enum LatencyValue {
+    /// Valid latency measurement in milliseconds
     Ms(u64),
+    /// Negative value indicating potential clock drift between systems
     ClockDrift(i64),
 }
 

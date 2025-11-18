@@ -1,13 +1,16 @@
 import { Queue } from '../accounts/queue.js';
+import {
+  SPL_SYSVAR_INSTRUCTIONS_ID,
+  SPL_SYSVAR_SLOT_HASHES_ID,
+} from '../constants.js';
 import { Ed25519InstructionUtils } from '../instruction-utils/ed25519-instruction-utils.js';
-import type { Secp256k1Signature } from '../instruction-utils/secp256k1-instruction-utils.js';
-import { Secp256k1InstructionUtils } from '../instruction-utils/secp256k1-instruction-utils.js';
 import { Gateway } from '../oracle-interfaces/gateway.js';
 import { SignatureAuth } from '../utils/signatureAuth.js';
 
+import { OracleQuote, QUOTE_PROGRAM_ID } from './oracleQuote.js';
 import { Source } from './source.js';
 
-import { BN, web3 } from '@coral-xyz/anchor-31';
+import { web3 } from '@coral-xyz/anchor-31';
 import { CrossbarClient } from '@switchboard-xyz/common';
 import axios from 'axios';
 import { Buffer } from 'buffer';
@@ -227,16 +230,19 @@ export class SurgeUpdate {
   }
 
   /**
-   * Convert to Solana bundle instruction supporting both signature schemes
-   * - Ed25519 (default): Returns single TransactionInstruction
-   * - Secp256k1 (backwards compat): Returns [TransactionInstruction, Buffer] tuple
+   * Convert to Solana bundle instructions for oracle update
+   * Uses Ed25519 signature verification and creates instructions to update the oracle account
    *
+   * @param queuePubkey - The queue public key for deriving the oracle account
+   * @param payer - The payer public key for the transaction
    * @param instructionIdx - The instruction index (defaults to 0)
-   * @returns Transaction instruction or [instruction, bundleData] tuple depending on signature scheme
+   * @returns Array of [Ed25519 verification instruction, quote program update instruction]
    */
   toQuoteIx(
+    queuePubkey: web3.PublicKey,
+    payer: web3.PublicKey,
     instructionIdx: number = 0
-  ): web3.TransactionInstruction | [web3.TransactionInstruction, Buffer] {
+  ): web3.TransactionInstruction[] {
     const response = this.rawResponse;
 
     // Check if oracle_response exists
@@ -244,93 +250,86 @@ export class SurgeUpdate {
       throw new Error('No oracle response available for creating signatures');
     }
 
-    // Check which signature type to use based on available fields
-    if (response.oracle_response.ed25519_enclave_signer) {
-      // Ed25519 path (new default) - matches Ed25519 v0 scheme
-      let pubkeyHex = response.oracle_response.ed25519_enclave_signer;
-
-      // If ed25519_enclave_signer is 64 bytes (128 hex chars), extract the first 32 bytes for Ed25519 pubkey
-      if (pubkeyHex && pubkeyHex.length === 128) {
-        pubkeyHex = pubkeyHex.substring(0, 64); // First 32 bytes (64 hex chars)
-      }
-
-      // Build the Ed25519 signature object
-      const ed25519Signature = {
-        pubkey: Buffer.from(pubkeyHex, 'hex'), // Ed25519 pubkey (32 bytes)
-        signature: Buffer.from(response.oracle_response.signature, 'base64'), // Signature
-        message: Buffer.from(response.oracle_response.checksum, 'base64'), // Message is the checksum for Ed25519
-        oracleIdx: response.oracle_response.oracle_idx, // Oracle index
-      };
-
-      // Build the Ed25519 instruction
-      const ed25519Instruction =
-        Ed25519InstructionUtils.buildEd25519Instruction(
-          [ed25519Signature],
-          instructionIdx,
-          response.oracle_response.slot, // recent_slot from oracle response
-          0 // version 0 for Ed25519 v0 scheme
-        );
-
-      return ed25519Instruction;
-    } else {
-      // Secp256k1 path (backwards compatibility)
-      const oracleResponse = response.oracle_response;
-
-      // Create SECP256k1 signature (following exact fetchUpdateBundleIx pattern)
-      const secpSignatures: Secp256k1Signature[] = [
-        {
-          ethAddress: Buffer.from(oracleResponse.eth_address, 'hex'),
-          signature: Buffer.from(oracleResponse.signature, 'base64'),
-          message: Buffer.from(oracleResponse.checksum, 'base64'),
-          recoveryId: oracleResponse.recovery_id,
-          oracleIdx: oracleResponse.oracle_idx,
-        },
-      ];
-
-      const secpInstruction =
-        Secp256k1InstructionUtils.buildSecp256k1Instruction(
-          secpSignatures,
-          instructionIdx
-        );
-
-      // Prepare the bundle data (simplified version for Surge compatibility)
-      const data = {
-        slotLower: Number(response.oracle_response.slot) & 0xff,
-        feedInfos:
-          response.feed_values?.map(feed => ({
-            value: new BN(feed.value),
-            checksum: Buffer.from(feed.feed_hash, 'hex'),
-            numOracles: 1, // Single oracle response
-          })) || [],
-      };
-
-      // Create a minimal bundle data buffer for compatibility
-      const bundleDataLength = 1 + data.feedInfos.length * (16 + 32 + 1); // slot + (value + checksum + numOracles) per feed
-      const bundleData = Buffer.alloc(bundleDataLength);
-      let offset = 0;
-
-      // Write slot lower byte
-      bundleData.writeUInt8(data.slotLower, offset);
-      offset += 1;
-
-      // Write feed infos
-      for (const feedInfo of data.feedInfos) {
-        // Write value as 16 bytes LE
-        const valueBytes = feedInfo.value.toArrayLike(Buffer, 'le', 16);
-        valueBytes.copy(bundleData, offset);
-        offset += 16;
-
-        // Write checksum (32 bytes)
-        feedInfo.checksum.copy(bundleData, offset);
-        offset += 32;
-
-        // Write numOracles (1 byte)
-        bundleData.writeUInt8(feedInfo.numOracles, offset);
-        offset += 1;
-      }
-
-      return [secpInstruction, bundleData];
+    // Check if Ed25519 enclave signer exists
+    if (!response.oracle_response.ed25519_enclave_signer) {
+      throw new Error(
+        'Ed25519 enclave signer not available in oracle response'
+      );
     }
+
+    // Ed25519 path - matches Ed25519 v0 scheme
+    let pubkeyHex = response.oracle_response.ed25519_enclave_signer;
+
+    // If ed25519_enclave_signer is 64 bytes (128 hex chars), extract the first 32 bytes for Ed25519 pubkey
+    if (pubkeyHex && pubkeyHex.length === 128) {
+      pubkeyHex = pubkeyHex.substring(0, 64); // First 32 bytes (64 hex chars)
+    }
+
+    // Build the Ed25519 signature object
+    const ed25519Signature = {
+      pubkey: Buffer.from(pubkeyHex, 'hex'), // Ed25519 pubkey (32 bytes)
+      signature: Buffer.from(response.oracle_response.signature, 'base64'), // Signature
+      message: Buffer.from(response.oracle_response.checksum, 'base64'), // Message is the checksum for Ed25519
+      oracleIdx: response.oracle_response.oracle_idx, // Oracle index
+    };
+
+    // Build the Ed25519 instruction
+    const ed25519Instruction = Ed25519InstructionUtils.buildEd25519Instruction(
+      [ed25519Signature],
+      instructionIdx,
+      response.oracle_response.slot, // recent_slot from oracle response
+      0 // version 0 for Ed25519 v0 scheme
+    );
+
+    // Get feed hashes from the response
+    const feedHashes =
+      response.feed_values?.map(feed => '0x' + feed.feed_hash) || [];
+
+    if (feedHashes.length === 0) {
+      throw new Error('No feed values available in oracle response');
+    }
+
+    // Derive the canonical oracle account from feed hashes
+    const [oracleAccount, bump] = OracleQuote.getCanonicalPubkey(
+      queuePubkey,
+      feedHashes,
+      QUOTE_PROGRAM_ID
+    );
+
+    const opcode = 0;
+
+    // Create the quote program verified_update instruction
+    const quoteProgramIx = new web3.TransactionInstruction({
+      programId: QUOTE_PROGRAM_ID,
+      keys: [
+        { pubkey: queuePubkey, isSigner: false, isWritable: false }, // queue_account [0]
+        { pubkey: oracleAccount, isSigner: false, isWritable: true }, // oracle_account [1]
+        {
+          pubkey: SPL_SYSVAR_INSTRUCTIONS_ID,
+          isSigner: false,
+          isWritable: false,
+        }, // ix_sysvar [2]
+        {
+          pubkey: SPL_SYSVAR_SLOT_HASHES_ID,
+          isSigner: false,
+          isWritable: false,
+        }, // slot_sysvar [3]
+        {
+          pubkey: web3.SYSVAR_CLOCK_PUBKEY,
+          isSigner: false,
+          isWritable: false,
+        }, // clock_sysvar [4]
+        { pubkey: payer, isSigner: true, isWritable: true }, // payer [5]
+        {
+          pubkey: web3.SystemProgram.programId,
+          isSigner: false,
+          isWritable: false,
+        }, // system_program [6]
+      ],
+      data: Buffer.from([opcode, instructionIdx, bump]), // [opcode, ix_idx, bump]
+    });
+
+    return [ed25519Instruction, quoteProgramIx];
   }
 }
 
