@@ -18,9 +18,8 @@ import axios from 'axios';
 import { Buffer } from 'buffer';
 import { EventEmitter } from 'events';
 import WebSocket from 'isomorphic-ws';
-
 /**
- * Raw gateway response structure (matches actual BundledFeedUpdate from server)
+ * Raw gateway response structure (matches actual BundledFeedUpdate from server).
  */
 interface RawGatewayResponse {
   type: string;
@@ -1049,13 +1048,13 @@ export class Surge extends EventEmitter {
     const sessionData: { session_token: string; ws_url: string } = this.config
       .crossbarMode
       ? {
-          session_token: response.data.session_token,
-          ws_url: response.data.simulator_ws_url,
-        }
+        session_token: response.data.session_token,
+        ws_url: response.data.simulator_ws_url,
+      }
       : {
-          session_token: response.data.session_token,
-          ws_url: response.data.oracle_ws_url,
-        };
+        session_token: response.data.session_token,
+        ws_url: response.data.oracle_ws_url,
+      };
     this.log(
       `✅ Session obtained: ${sessionData.session_token?.substring(0, 8)}...`
     );
@@ -2444,17 +2443,17 @@ export class Surge extends EventEmitter {
 
     let unsubscribeMessage:
       | {
-          type: string;
-          feed_bundle_ids?: string[];
-          feed_bundles?: Array<{
-            feeds: Array<{ symbol: Pair; source: string }>;
-          }>;
-          // Signature fields for authentication
-          pubkey?: string;
-          signature?: string;
-          blockhash?: string;
-          timestamp?: number;
-        }
+        type: string;
+        feed_bundle_ids?: string[];
+        feed_bundles?: Array<{
+          feeds: Array<{ symbol: Pair; source: string }>;
+        }>;
+        // Signature fields for authentication
+        pubkey?: string;
+        signature?: string;
+        blockhash?: string;
+        timestamp?: number;
+      }
       | undefined;
 
     if (this.config.crossbarMode) {
