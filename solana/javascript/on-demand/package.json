@@ -1,6 +1,6 @@
 {
   "name": "@switchboard-xyz/on-demand",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "A Typescript client to interact with Switchboard On-Demand.",
   "license": "ISC",
   "main": "dist/cjs/index.js",
@@ -31,6 +31,8 @@
   "dependencies": {
     "@coral-xyz/anchor-31": "npm:@coral-xyz/anchor@0.31.1",
     "@isaacs/ttlcache": "^1.4.1",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
     "@switchboard-xyz/common": "^5.2.9",
     "axios": "^1.9",
     "bs58": "^6.0.0",
@@ -38,6 +40,7 @@
     "events": "^3.3.0",
     "isomorphic-ws": "^5.0.0",
     "js-yaml": "^4.1.0",
+    "tweetnacl": "^1.0.3",
     "ws": "^8.18.1"
   },
   "devDependencies": {

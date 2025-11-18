@@ -234,7 +234,7 @@ export class SurgeUpdate {
    * @param instructionIdx - The instruction index (defaults to 0)
    * @returns Transaction instruction or [instruction, bundleData] tuple depending on signature scheme
    */
-  toBundleIx(
+  toQuoteIx(
     instructionIdx: number = 0
   ): web3.TransactionInstruction | [web3.TransactionInstruction, Buffer] {
     const response = this.rawResponse;
