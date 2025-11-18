@@ -1,17 +1,19 @@
 import { Queue } from '../accounts/queue.js';
+import { AnchorUtils } from '../anchor-utils/anchor-utils.js';
 import {
   SPL_SYSVAR_INSTRUCTIONS_ID,
   SPL_SYSVAR_SLOT_HASHES_ID,
 } from '../constants.js';
 import { Ed25519InstructionUtils } from '../instruction-utils/ed25519-instruction-utils.js';
 import { Gateway } from '../oracle-interfaces/gateway.js';
+import { isMainnetConnection } from '../utils/index.js';
 import { SignatureAuth } from '../utils/signatureAuth.js';
 
 import { OracleQuote, QUOTE_PROGRAM_ID } from './oracleQuote.js';
 import { Source } from './source.js';
 
 import { web3 } from '@coral-xyz/anchor-31';
-import { CrossbarClient } from '@switchboard-xyz/common';
+import { CrossbarClient, CrossbarNetwork } from '@switchboard-xyz/common';
 import axios from 'axios';
 import { Buffer } from 'buffer';
 import { EventEmitter } from 'events';
@@ -26,6 +28,11 @@ interface RawGatewayResponse {
   feed_values?: Array<{
     value: string;
     feed_hash: string;
+    symbol?: string;
+    source?: string;
+    event_ts?: number; // Exchange timestamp
+    seen_at?: number; // Oracle reception time
+    verified_at?: number; // Oracle verification time
   }>;
   oracle_response?: {
     oracle_pubkey: string;
@@ -41,8 +48,9 @@ interface RawGatewayResponse {
     // Ed25519 enclave signer pubkey (for Ed25519 signature verification)
     ed25519_enclave_signer?: string;
   };
-  source_ts_ms: number;
-  seen_at_ts_ms: number;
+  broadcast_ts_ms?: number; // New: When oracle decided to broadcast (after signing)
+  source_ts_ms: number; // Deprecated: kept for backwards compatibility
+  seen_at_ts_ms: number; // Deprecated: kept for backwards compatibility
   triggered_on_price_change: boolean;
   message?: string;
 }
@@ -789,6 +797,89 @@ export class Surge extends EventEmitter {
   }
 
   /**
+   * Ensures gateway URL is available, fetching from crossbar if needed.
+   * Detects network lazily (following Queue/PullFeed pattern).
+   * @private
+   */
+  private async ensureGatewayUrl(): Promise<void> {
+    // Skip if gateway URL already set or in crossbar mode
+    if (this.config.gatewayUrl || this.config.crossbarMode) {
+      return;
+    }
+
+    try {
+      this.log('🔍 Gateway URL not provided, fetching from crossbar...');
+
+      // Lazy network detection (following Queue/PullFeed pattern)
+      // Get connection from queue > connection > loadEnv() > default to mainnet
+      let connection: web3.Connection | undefined;
+      if (this.config.queue) {
+        this.log(
+          '🔧 Using provided queue.program.provider.connection for network detection'
+        );
+        connection = this.config.queue.program.provider.connection;
+      } else if (this.config.connection) {
+        this.log('🔧 Using provided connection for network detection');
+        connection = this.config.connection;
+      } else {
+        // Auto-load from environment (Solana CLI config)
+        this.log(
+          '🔧 No queue/connection provided, attempting to load from Solana CLI config...'
+        );
+        try {
+          const env = await AnchorUtils.loadEnv();
+          connection = env.connection;
+          this.log(
+            `✅ Loaded connection from environment: ${connection.rpcEndpoint}`
+          );
+        } catch (err) {
+          this.log(
+            `⚠️ Could not load from environment (${err instanceof Error ? err.message : 'unknown error'}), will use fallback`
+          );
+        }
+      }
+
+      // Detect and set network if we have a connection
+      if (connection) {
+        try {
+          const isMainnet = await isMainnetConnection(connection);
+          const network = isMainnet
+            ? CrossbarNetwork.SolanaMainnet
+            : CrossbarNetwork.SolanaDevnet;
+          this.crossbar.setNetwork(network);
+          this.log(`🌐 Auto-detected network from connection: ${network}`);
+        } catch (err) {
+          this.log(
+            `⚠️ Failed to auto-detect network (${err instanceof Error ? err.message : 'unknown error'}), using default (mainnet)`
+          );
+        }
+      } else if (this.config.network) {
+        // Fallback: use configured network string
+        const network = this.config.network.includes('mainnet')
+          ? CrossbarNetwork.SolanaMainnet
+          : CrossbarNetwork.SolanaDevnet;
+        this.crossbar.setNetwork(network);
+        this.log(
+          `🌐 Using configured network string: ${this.config.network} → ${network}`
+        );
+      } else {
+        this.log(
+          '🌐 No network info available, using crossbar default (mainnet)'
+        );
+      }
+
+      const gateway = await this.crossbar.fetchGateway();
+      this.config.gatewayUrl = gateway.gatewayUrl;
+      this.gateway = gateway;
+      this.log(`✅ Auto-fetched gateway: ${this.config.gatewayUrl}`);
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch gateway from crossbar: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
    * Request a session token from the gateway (following bundle_verbose_test.ts pattern)
    * @param feedHints Optional feeds for oracle selection
    */
@@ -839,15 +930,8 @@ export class Surge extends EventEmitter {
       gatewayUrl =
         this.config.crossbarUrl || 'https://crossbar.switchboard.xyz';
     } else {
-      let crossbar = this.config.crossbarClient;
-      if (!crossbar) {
-        crossbar = new CrossbarClient(
-          this.config.crossbarUrl ?? 'https://crossbar.switchboard.xyz'
-        );
-      }
-      if (!this.config.gatewayUrl) {
-        this.config.gatewayUrl = (await crossbar.fetchGateway()).gatewayUrl;
-      }
+      // Ensure gateway URL is available (with network detection)
+      await this.ensureGatewayUrl();
       // Use provided URL or default for oracle mode
       gatewayUrl = this.config.gatewayUrl!;
     }
@@ -2178,6 +2262,9 @@ export class Surge extends EventEmitter {
    */
   async getFeedInfo(symbol: string): Promise<SurgeSymbolGroup | null> {
     try {
+      // Ensure gateway URL is available
+      await this.ensureGatewayUrl();
+
       let endpoint: string;
 
       if (this.config.crossbarMode) {
@@ -2243,6 +2330,9 @@ export class Surge extends EventEmitter {
    */
   private async getSurgeFeeds(): Promise<SurgeFeedsResponse> {
     try {
+      // Ensure gateway URL is available
+      await this.ensureGatewayUrl();
+
       let endpoint: string;
 
       if (this.config.crossbarMode) {
