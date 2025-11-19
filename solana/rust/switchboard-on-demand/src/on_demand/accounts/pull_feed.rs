@@ -206,7 +206,8 @@ pub struct PullFeedAccountData {
     pub min_responses: u32,
     /// Human-readable name for this feed
     pub name: [u8; 32],
-    padding1: [u8; 2],
+    padding1: [u8; 1],
+    pub permit_write_by_authority: u8,
     /// Index for the next historical result entry
     pub historical_result_idx: u8,
     /// Minimum number of samples required for a valid result
