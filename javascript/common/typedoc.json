@@ -1,0 +1,26 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/esm-utils.js",
+    "src/protos.ts",
+    "src/networks/index.ts",
+    "src/secrets.ts",
+    "src/utils/async.ts",
+    "src/utils/axios.ts",
+    "src/utils/big.ts",
+    "src/utils/non-empty-array.ts",
+    "src/utils/number.ts",
+    "src/utils/oracle-feed.ts",
+    "src/utils/oracle-job.ts"
+  ],
+  "out": "docs",
+  "plugin": [],
+  "exclude": ["**/node_modules/**", "**/test/**"],
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeInternal": false,
+  "readme": "README.md",
+  "name": "@switchboard-xyz/common",
+  "includeVersion": true
+}
