@@ -298,6 +298,7 @@ impl CrossbarClient {
         &self,
         network: ClusterType,
         feed_pubkeys: &[Pubkey],
+        include_receipts: bool,
     ) -> Result<Vec<SimulateSolanaFeedsResponse>, AnyhowError> {
         if feed_pubkeys.is_empty() {
             return Err(anyhow!("Feed pubkeys are empty"));
@@ -310,7 +311,11 @@ impl CrossbarClient {
             "{}/simulate/solana/{}/{}",
             self.crossbar_url, network, feeds_param
         );
-        let resp = self.client.get(&url).send().await?;
+        let mut req = self.client.get(&url);
+        if include_receipts {
+            req = req.query(&[("includeReceipts", "true")]);
+        }
+        let resp = req.send().await?;
 
         let status = resp.status();
         let raw = resp.text().await.context("Failed to fetch response")?;
@@ -341,6 +346,7 @@ impl CrossbarClient {
     pub async fn simulate_feeds(
         &self,
         feed_hashes: &[&str],
+        include_receipts: bool,
     ) -> Result<Vec<SimulateFeedsResponse>, AnyhowError> {
         if feed_hashes.is_empty() {
             return Err(anyhow!("Feed hashes are empty"));
@@ -348,9 +354,11 @@ impl CrossbarClient {
 
         let feeds_param = feed_hashes.join(",");
         let url = format!("{}/simulate/{}", self.crossbar_url, feeds_param);
-        let resp = self
-            .client
-            .get(&url)
+        let mut req = self.client.get(&url);
+        if include_receipts {
+            req = req.query(&[("includeReceipts", "true")]);
+        }
+        let resp = req
             .send()
             .await
             .context("Failed to send simulate feeds request")?;
@@ -504,6 +512,7 @@ impl CrossbarClient {
         &'a self,
         feed_hashes: Vec<&'a str>,
         poll_interval: Duration,
+        include_receipts: bool,
     ) -> impl Stream<Item = Result<Vec<SimulateFeedsResponse>, AnyhowError>> + 'a {
         // Create an interval timer stream.
         let interval_stream = IntervalStream::new(interval(poll_interval));
@@ -511,7 +520,7 @@ impl CrossbarClient {
         // For each tick, call the simulate_feeds function.
         interval_stream.then(move |_| {
             let feed_hashes = feed_hashes.clone();
-            async move { self.simulate_feeds(&feed_hashes).await }
+            async move { self.simulate_feeds(&feed_hashes, include_receipts).await }
         })
     }
 
@@ -521,11 +530,12 @@ impl CrossbarClient {
         network: ClusterType,
         feed_pubkeys: &'a [Pubkey],
         poll_interval: Duration,
+        include_receipts: bool,
     ) -> impl Stream<Item = Result<Vec<SimulateSolanaFeedsResponse>, AnyhowError>> + 'a {
         let interval_stream = IntervalStream::new(interval(poll_interval));
         interval_stream.then(move |_| {
             let network = network;
-            async move { self.simulate_solana_feeds(network, feed_pubkeys).await }
+            async move { self.simulate_solana_feeds(network, feed_pubkeys, include_receipts).await }
         })
     }
 
@@ -619,7 +629,7 @@ mod tests {
         let key = Pubkey::from_str("D1MmZ3je8GCjLrTbWXotnZ797k6E56QkdyXyhPXZQocH").unwrap();
         let client = CrossbarClient::default();
         let resp = client
-            .simulate_solana_feeds(ClusterType::MainnetBeta, &[key])
+            .simulate_solana_feeds(ClusterType::MainnetBeta, &[key], false)
             .await
             .unwrap();
         println!("{:?}", resp);
