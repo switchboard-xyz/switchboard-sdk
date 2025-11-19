@@ -233,13 +233,20 @@ export class SurgeUpdate {
     // Calculate oracle to client latency
     const oracleBroadcastToClientMs = clientReceiveTimeMs - broadcastTimeMs;
 
-    // Calculate internal switchboard processing latency (broadcast_ts - max(verified_at))
+    // Calculate internal switchboard processing latency
     const feedValues = this.rawResponse.feed_values ?? [];
-    const maxVerifiedAt = feedValues.reduce((max, feed) => {
-      const verifiedAt = feed.verified_at ?? 0;
-      return verifiedAt > max ? verifiedAt : max;
-    }, 0);
-    const swInternalLatencyMs = broadcastTimeMs - maxVerifiedAt;
+    let swInternalLatencyMs: number;
+    if (isHeartbeat) {
+      // For heartbeats: broadcast_ts - heartbeat_at_ts
+      swInternalLatencyMs = broadcastTimeMs - heartbeatAtMs;
+    } else {
+      // For price changes: broadcast_ts - max(verified_at)
+      const maxVerifiedAt = feedValues.reduce((max, feed) => {
+        const verifiedAt = feed.verified_at ?? 0;
+        return verifiedAt > max ? verifiedAt : max;
+      }, 0);
+      swInternalLatencyMs = broadcastTimeMs - maxVerifiedAt;
+    }
 
     // Calculate per-feed metrics
     const perFeedMetrics = feedValues.map(feed => {
