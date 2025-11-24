@@ -32,11 +32,13 @@ ${GITHUB_PR_BODY}
 '''
     ),
     origin_files = glob([
+      "javacsript/**",
       "solana/**"
     ]),
     # Only affect files under these paths in the destination
     destination_files = glob([
       "javascript/on-demand/**",
+      "javascript/common/**",
       "rust/switchboard-on-demand/**",
       "rust/switchboard-on-demand-client/**"
     ]),
