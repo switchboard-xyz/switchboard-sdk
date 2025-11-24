@@ -2,6 +2,37 @@ import type { FetchSignaturesConsensusResponse } from './types/crossbar.js';
 
 const SCALE_FACTOR = 1e18;
 
+/**
+ * Surge update response structure from Switchboard Surge
+ */
+export interface SurgeRawGatewayResponse {
+  type: string;
+  feed_bundle_id?: string;
+  feed_values?: Array<{
+    value: string;
+    feed_hash: string;
+    symbol?: string;
+    source?: string;
+  }>;
+  oracle_response?: {
+    oracle_pubkey: string;
+    eth_address: string;
+    signature: string;
+    checksum: string;
+    recovery_id: number;
+    oracle_idx: number;
+    timestamp: number;
+    timestamp_ms?: number;
+    recent_hash: string;
+    slot: number;
+    ed25519_enclave_signer?: string;
+  };
+  source_ts_ms: number;
+  seen_at_ts_ms: number;
+  triggered_on_price_change: boolean;
+  message?: string;
+}
+
 export class EVMUtils {
   /**
    * Convert fetch signatures consensus response to EVM-compatible bytes
@@ -209,6 +240,148 @@ export class EVMUtils {
     }
 
     return bytes;
+  }
+
+  /**
+   * Convert a Surge update to EVM encoded format
+   * Format: slot(8) + timestamp(8) + numFeeds(1) + numSigs(1) + feeds(49*n) + sigs(65*m)
+   * @param surgeUpdate - The SurgeUpdate from Switchboard Surge
+   * @param options - Optional parameters including minOracleSamples
+   * @returns Hex-encoded string in EVM format
+   */
+  static convertSurgeUpdateToEvmFormat(
+    surgeUpdate: SurgeRawGatewayResponse,
+    options?: { minOracleSamples?: number }
+  ): string {
+    const minOracleSamples = options?.minOracleSamples ?? 1;
+
+    // Extract data from surge update
+    const feedValues = surgeUpdate.feed_values ?? [];
+    const oracleResponse = surgeUpdate.oracle_response;
+
+    if (!oracleResponse) {
+      throw new Error('Oracle response is required for EVM format conversion');
+    }
+
+    const slot = oracleResponse.slot;
+    const timestampSeconds = oracleResponse.timestamp;
+    const signature = oracleResponse.signature;
+    const recoveryId = oracleResponse.recovery_id;
+
+    // Validate inputs
+    if (feedValues.length === 0 || feedValues.length > 255) {
+      throw new Error('Invalid feed count: must be between 1 and 255');
+    }
+
+    // Calculate total size: 18 byte header + 49 bytes per feed + 65 bytes per signature
+    const numFeeds = feedValues.length;
+    const numSigs = 1; // Single oracle response
+    const totalSize = 18 + numFeeds * 49 + numSigs * 65;
+
+    const buffer = new Uint8Array(totalSize);
+    let offset = 0;
+
+    // Write header (18 bytes)
+    // Slot number (8 bytes, big-endian uint64)
+    const slotBytes = new ArrayBuffer(8);
+    const slotView = new DataView(slotBytes);
+    slotView.setBigUint64(0, BigInt(slot), false); // false = big-endian
+    buffer.set(new Uint8Array(slotBytes), offset);
+    offset += 8;
+
+    // Timestamp (8 bytes, big-endian uint64)
+    const timestampBytes = new ArrayBuffer(8);
+    const timestampView = new DataView(timestampBytes);
+    timestampView.setBigUint64(0, BigInt(timestampSeconds), false); // false = big-endian
+    buffer.set(new Uint8Array(timestampBytes), offset);
+    offset += 8;
+
+    // Number of feeds (1 byte)
+    buffer[offset++] = numFeeds;
+
+    // Number of signatures (1 byte)
+    buffer[offset++] = numSigs;
+
+    // Write feed infos (49 bytes each)
+    for (const feedValue of feedValues) {
+      // Feed ID (32 bytes)
+      const feedHashHex = feedValue.feed_hash.startsWith('0x')
+        ? feedValue.feed_hash.slice(2)
+        : feedValue.feed_hash;
+
+      const feedIdBytes = this.hexToBytes(feedHashHex);
+      if (feedIdBytes.length !== 32) {
+        throw new Error('Feed hash must be 32 bytes');
+      }
+      buffer.set(feedIdBytes, offset);
+      offset += 32;
+
+      // Value (16 bytes, big-endian int128)
+      const value = BigInt(feedValue.value);
+      const valueBytes = this.encodeInt128(value);
+      buffer.set(valueBytes, offset);
+      offset += 16;
+
+      // Min oracle samples (1 byte)
+      buffer[offset++] = minOracleSamples;
+    }
+
+    // Write signatures (65 bytes each)
+    // Convert signature from base64 to bytes and append recovery ID
+    const signatureBytes = this.base64ToBytes(signature);
+
+    // For EVM, recovery_id needs to be adjusted to v parameter (recovery_id + 27)
+    const v = recoveryId + 27;
+
+    if (signatureBytes.length !== 64) {
+      throw new Error('Invalid signature length: expected 64 bytes');
+    }
+
+    buffer.set(signatureBytes, offset);
+    offset += 64;
+    buffer[offset++] = v;
+
+    return `0x${this.bytesToHex(buffer)}`;
+  }
+
+  /**
+   * Encode int128 to 16 bytes (big-endian, two's complement)
+   */
+  private static encodeInt128(value: bigint): Uint8Array {
+    const bytes = new Uint8Array(16);
+
+    // Convert to two's complement representation
+    let unsignedValue: bigint;
+    if (value < BigInt(0)) {
+      // Two's complement for negative numbers
+      unsignedValue = (BigInt(1) << BigInt(127)) + value;
+    } else {
+      unsignedValue = value;
+    }
+
+    // Write as big-endian
+    for (let i = 15; i >= 0; i--) {
+      bytes[15 - i] = Number((unsignedValue >> BigInt(i * 8)) & BigInt(0xff));
+    }
+
+    return bytes;
+  }
+
+  /**
+   * Convert base64 string to bytes
+   */
+  private static base64ToBytes(base64: string): Uint8Array {
+    const buffer = Buffer.from(base64, 'base64');
+    return new Uint8Array(buffer);
+  }
+
+  /**
+   * Convert bytes to hex string
+   */
+  private static bytesToHex(bytes: Uint8Array): string {
+    return Array.from(bytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 
   /**

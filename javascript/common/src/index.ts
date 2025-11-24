@@ -1,5 +1,6 @@
 export * as BigUtils from './big.js';
 export * from './crossbar-client.js';
+export * from './evm-utils.js';
 export * from './feed-hash.js';
 export * from './gateway.js';
 export { default as networks } from './networks/index.js';
