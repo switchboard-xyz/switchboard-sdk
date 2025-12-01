@@ -5,7 +5,7 @@ use crate::solana_program::instruction::{Instruction, AccountMeta};
 use crate::solana_compat::address_lookup_table::state::AddressLookupTable;
 use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::solana_compat::address_lookup_table::AddressLookupTableAccount;
-use crate::solana_program::hash::Hash;
+use crate::solana_compat::hash::Hash;
 use crate::solana_compat::compute_budget::ComputeBudgetInstruction;
 use crate::solana_compat::solana_sdk::signer::Signer;
 use crate::solana_compat::solana_sdk::transaction::VersionedTransaction;

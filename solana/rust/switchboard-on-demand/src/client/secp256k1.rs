@@ -1,5 +1,5 @@
 use crate::solana_program::instruction::Instruction;
-use crate::solana_program::secp256k1_program;
+use crate::solana_compat::solana_sdk::secp256k1_program;
 
 // Constants per Solana's secp256k1 instruction specification:
 const SIGNATURE_SERIALIZED_SIZE: usize = 64;

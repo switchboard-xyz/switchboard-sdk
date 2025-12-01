@@ -15,7 +15,7 @@ use anyhow::Error as AnyhowError;
 use crate::solana_compat::solana_sdk::message::v0::Message as V0Message;
 use crate::solana_compat::solana_sdk::transaction::VersionedTransaction;
 use crate::solana_compat::compute_budget::ComputeBudgetInstruction;
-use crate::solana_program::hash::Hash;
+use crate::solana_compat::hash::Hash;
 use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::solana_compat::address_lookup_table::AddressLookupTableAccount;
 use crate::solana_compat::solana_sdk::message::VersionedMessage::V0;
@@ -167,7 +167,7 @@ async fn estimate_compute_units(rpc_client: &RpcClient, ixs: &[Instruction], lut
 pub fn ix_to_tx(
     ixs: &[Instruction],
     signers: &[&Keypair],
-    blockhash: crate::solana_program::hash::Hash,
+    blockhash: Hash,
 ) -> Result<Transaction, OnDemandError> {
     // Convert instructions to compatible type for solana_sdk
     let converted_ixs: Vec<crate::solana_compat::solana_sdk::instruction::Instruction> = ixs.iter().map(|ix| {

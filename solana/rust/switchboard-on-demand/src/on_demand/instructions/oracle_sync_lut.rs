@@ -94,8 +94,8 @@ use crate::derive_lookup_table_address;
 use crate::get_sb_program_id;
 use crate::find_lut_signer;
 
-const JITO_VAULT_ID: Pubkey = solana_program::pubkey!("Vau1t6sLNxnzB7ZDsef8TLbPLfyZMYXH8WTNqUdm9g8");
-const JITO_RESTAKING_ID: Pubkey = solana_program::pubkey!("RestkWeAVL8fRGgzhfeoqFhsqKRchg6aa1XrcH96z4Q");
+const JITO_VAULT_ID: Pubkey = crate::solana_compat::pubkey!("Vau1t6sLNxnzB7ZDsef8TLbPLfyZMYXH8WTNqUdm9g8");
+const JITO_RESTAKING_ID: Pubkey = crate::solana_compat::pubkey!("RestkWeAVL8fRGgzhfeoqFhsqKRchg6aa1XrcH96z4Q");
 
 impl OracleSyncLut {
     pub async fn build_ix(client: &RpcClient, args: OracleSyncLutArgs) -> Result<Instruction, OnDemandError> {
