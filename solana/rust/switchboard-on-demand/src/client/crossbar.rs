@@ -14,12 +14,21 @@ use switchboard_utils::utils::median;
 use tokio::time::interval;
 use tokio::time::Duration;
 use tokio_stream::wrappers::IntervalStream;
+use switchboard_protos::OracleFeed;
+use prost::Message;
+use base64::prelude::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct StoreResponse {
     pub cid: String,
     pub feedHash: String,
     pub queueHex: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct OracleFeedStoreResponse {
+    pub cid: String,
+    pub feedId: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,6 +76,19 @@ pub struct SimulateFeedsResponse {
     pub results: Vec<Decimal>,
     #[serde(skip_deserializing, default)]
     pub result: Decimal,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CrossbarSimulateProtoResponse {
+    pub feedHash: Option<String>,
+    pub results: Vec<String>,
+    #[serde(default)]
+    pub logs: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CrossbarOracleFeedFetchResponse {
+    pub data: String, // Base64 encoded proto
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -191,6 +213,45 @@ impl CrossbarClient {
         })
     }
 
+    /// GET /v2/fetch/:feedHash
+    /// Fetch OracleFeed data from a crossbar server using the provided feedId
+    /// # Arguments
+    /// * `feed_id` - The identifier of the OracleFeed to fetch
+    /// # Returns
+    /// * `Result<CrossbarOracleFeedFetchResponse, AnyhowError>` - The data fetched from the crossbar
+    pub async fn fetch_oracle_feed(&self, feed_id: &str) -> Result<CrossbarOracleFeedFetchResponse, AnyhowError> {
+        let url = format!("{}/v2/fetch/{}", self.crossbar_url, feed_id);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send v2 fetch request")?;
+
+        let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!("{}: {}", status, raw);
+            }
+            return Err(anyhow!(
+                "Bad status code {} for fetch_oracle_feed '{}'. Response: {}",
+                status.as_u16(),
+                feed_id,
+                raw
+            ));
+        }
+
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse fetch_oracle_feed response. URL: {}. Raw response (first 500 chars): {}",
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
+    }
+
     /// Store feed jobs in the crossbar gateway to a pinned IPFS address
     pub async fn store(
         &self,
@@ -232,6 +293,51 @@ impl CrossbarClient {
             format!(
                 "Failed to parse store response for queue '{}'. URL: {}. Raw response (first 500 chars): {}",
                 queue_address,
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
+    }
+
+    /// POST /v2/store
+    /// Store an OracleFeed on IPFS using crossbar.
+    /// # Arguments
+    /// * `feed` - The OracleFeed to store (as serde_json::Value matching IOracleFeed)
+    /// # Returns
+    /// * `Result<OracleFeedStoreResponse, AnyhowError>` - The stored data information
+    pub async fn store_oracle_feed(
+        &self,
+        feed: &serde_json::Value,
+    ) -> Result<OracleFeedStoreResponse, AnyhowError> {
+        let url = format!("{}/v2/store", self.crossbar_url);
+        let payload = serde_json::json!({ "feed": feed });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .context("Failed to send v2 store request")?;
+
+        let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!("{}: {}", status, raw);
+            }
+            return Err(anyhow!(
+                "Bad status code {} for store_oracle_feed. Response: {}",
+                status.as_u16(),
+                raw
+            ));
+        }
+
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse store_oracle_feed response. URL: {}. Raw response (first 500 chars): {}",
                 url,
                 &raw.chars().take(500).collect::<String>()
             )
@@ -391,6 +497,81 @@ impl CrossbarClient {
             response.result = median(response.results.clone()).expect("Failed to compute median");
         }
         Ok(responses)
+    }
+
+    /// POST /v2/simulate/proto
+    /// Simulate an OracleFeed from a protobuf object or feed hash
+    /// # Arguments
+    /// * `feed_or_hash` - The OracleFeed protobuf object (base64 string) or feed hash to simulate
+    /// * `include_receipts` - Whether to include receipts in the response
+    /// * `network` - Network to use for simulation
+    /// # Returns
+    /// * `Result<CrossbarSimulateProtoResponse, AnyhowError>` - The simulation results
+    pub async fn simulate_proto(
+        &self,
+        feed_or_hash: &str, // Can be feedHash or base64 encoded proto
+        include_receipts: bool,
+        network: Option<&str>,
+    ) -> Result<CrossbarSimulateProtoResponse, AnyhowError> {
+        let mut oracle_feed_b64 = feed_or_hash.to_string();
+        
+        // Simple heuristic: if it looks like a hash (hex, 64 chars or 66 with 0x), fetch it.
+        // Otherwise assume it's base64 encoded proto.
+        let is_hash = feed_or_hash.starts_with("0x") || feed_or_hash.len() == 64; 
+        
+        if is_hash {
+             // println!("DEBUG: Fetching feed for hash: {}", feed_or_hash);
+             let fetch_resp = self.fetch_oracle_feed(feed_or_hash).await?;
+             // println!("DEBUG: Fetched data: {}", fetch_resp.data);
+             
+             // DECODE AND RE-ENCODE logic
+             let delimited_bytes = BASE64_STANDARD.decode(&fetch_resp.data).context("Failed to decode base64")?;
+             let feed = OracleFeed::decode_length_delimited(delimited_bytes.as_slice()).context("Failed to decode length delimited proto")?;
+             let standard_bytes = feed.encode_to_vec();
+             oracle_feed_b64 = BASE64_STANDARD.encode(standard_bytes);
+        }
+
+        let url = format!("{}/v2/simulate/proto", self.crossbar_url);
+        let payload = serde_json::json!({
+            "oracleFeed": oracle_feed_b64,
+            "includeReceipts": include_receipts,
+            "network": network.unwrap_or("mainnet"),
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .context("Failed to send v2 simulate request")?;
+
+        let status = resp.status();
+        let raw = resp.text().await.context("Failed to fetch response text")?;
+
+        if !status.is_success() {
+             if self.verbose {
+                eprintln!(
+                    "{}: {}",
+                    status,
+                    raw
+                );
+            }
+            return Err(anyhow!(
+                "Bad status code {} for simulate_proto. Response: {}",
+                status.as_u16(),
+                raw
+            ));
+        }
+        
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "Failed to parse simulate_proto response. URL: {}. Raw response (first 500 chars): {}",
+                url,
+                &raw.chars().take(500).collect::<String>()
+            )
+        })
     }
 
     /// Fetch the Sui feed update from the crossbar gateway.

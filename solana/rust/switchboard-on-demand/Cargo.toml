@@ -1,6 +1,6 @@
 [package]
 name = "switchboard-on-demand"
-version = "0.11.1"
+version = "0.11.2"
 # docs.rs autobuild has difficulty with ahash dep. Host yuorself at https://tiiny.host/
 documentation = "https://docs.rs/switchboard-on-demand/latest/switchboard_on_demand"
 edition = "2021"
@@ -115,4 +115,3 @@ tokio = { version = "^1.41", features = ["full", "tracing"], optional = true }
 tokio-stream = { version = ">=0.1.17", optional = true }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"], optional = true }
 url = { version = "2.5", optional = true }
-
