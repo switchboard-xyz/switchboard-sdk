@@ -1,6 +1,6 @@
 [package]
 name = "switchboard-on-demand"
-version = "0.11.2"
+version = "0.11.3"
 # docs.rs autobuild has difficulty with ahash dep. Host yuorself at https://tiiny.host/
 documentation = "https://docs.rs/switchboard-on-demand/latest/switchboard_on_demand"
 edition = "2021"

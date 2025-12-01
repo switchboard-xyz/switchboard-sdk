@@ -9059,7 +9059,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-on-demand"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "anchor-lang",
  "anyhow",
