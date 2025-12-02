@@ -351,21 +351,10 @@ export class Gateway {
   ): Promise<FetchSignaturesConsensusResponse> {
     const feedRequests = await Promise.all(
       feedHashes.map(async hash => {
-        try {
-          const ipfsData = await crossbar.fetchOracleFeed(hash);
-          return {
-            feed_proto_b64: ipfsData.data,
-          };
-        } catch {
-          console.warn('Using fallback v1 fetch for feed', hash);
-          const { jobs } = await crossbar.fetch(hash);
-          return {
-            jobs_b64_encoded: encodeJobs(jobs),
-            max_variance: 1e9, // default to 1% variance
-            min_responses: 1, // default to 1 job response
-            min_oracles: 1, // default to 1 oracle response
-          };
-        }
+        const ipfsData = await crossbar.fetchOracleFeed(hash);
+        return {
+          feed_proto_b64: ipfsData.data,
+        };
       })
     );
 

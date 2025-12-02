@@ -6,29 +6,24 @@ import type {
   SuiSimulationResult,
 } from './types/chains.js';
 import type {
-  CrossbarFetchResponse,
   CrossbarOracleFeedFetchResponse,
   CrossbarSimulateProtoResponse,
   FeedRequest,
   FetchSignaturesConsensusRequest,
   FetchSignaturesConsensusResponse,
-  FetchSignaturesRequest,
   OracleInfo,
   SimulateJobsRequest,
   SimulateJobsResponse,
   V2UpdateQuery,
   V2UpdateResponse,
 } from './types/crossbar.js';
-import type { FeedEvalResponse } from './types/gateway.js';
 import { IxFromHex } from './utils/instructions.js';
-import { decodeString } from './utils/string.js';
 import { Gateway } from './gateway.js';
-import type { IOracleFeed, IOracleJob } from './protos.js';
+import type { IOracleFeed } from './protos.js';
 import { OracleFeed } from './protos.js';
 
 import type { TransactionInstruction } from '@solana/web3.js';
 import axios from 'axios';
-import bs58 from 'bs58';
 
 /**
  * Network options for CrossbarClient operations
@@ -43,8 +38,7 @@ export class CrossbarClient {
   readonly crossbarUrl: string;
   readonly verbose: boolean;
 
-  // feed hash -> crossbar response
-  readonly feedCache = new Map<string, CrossbarFetchResponse>();
+  // feed hash -> crossbar response (v2 format)
   readonly oracleFeedCache = new Map<string, CrossbarOracleFeedFetchResponse>();
 
   // network -> gateway instance (cached)
@@ -131,44 +125,6 @@ export class CrossbarClient {
   }
 
   /**
-   * GET /fetch/:feedHash
-   * Fetch data from the crossbar using the provided feedHash
-   * @deprecated Use fetchOracleFeed() instead. The fetch() method uses the legacy v1 format.
-   * @param {string} feedHash - The hash of the feed to fetch data for
-   * @returns {Promise<CrossbarFetchResponse>} - The data fetched from the crossbar
-   */
-  async fetch(feedHash: string): Promise<CrossbarFetchResponse> {
-    console.warn(
-      '[Switchboard] Warning: fetch() is deprecated. Use fetchOracleFeed() instead.'
-    );
-    try {
-      // Check if the feedHash is already in the cache
-      const cached = this.feedCache.get(feedHash);
-      if (cached) return cached;
-
-      // Fetch the data from the crossbar
-
-      const response = await axios
-        .get(`${this.crossbarUrl}/fetch/${feedHash}`)
-        .then(resp => resp.data);
-
-      // Cache the response on the crossbar instance
-      this.feedCache.set(feedHash, response);
-
-      return response;
-    } catch (err) {
-      if (!axios.isAxiosError(err)) throw err;
-
-      const response = err.response;
-      if (!response) throw err;
-
-      // If response is outside of the 200 range, log the status and throw an error.
-      if (this.verbose) console.error(`${response.status}: ${response.data}`);
-      throw new Error(`Bad Crossbar fetch status: ${response.status}`);
-    }
-  }
-
-  /**
    * GET /v2/fetch/:feedHash
    * Fetch OracleFeed data from a crossbar server using the provided feedId
    * @param {string} feedId - The identifier of the OracleFeed to fetch
@@ -197,48 +153,6 @@ export class CrossbarClient {
       // If response is outside of the 200 range, log the status and throw an error.
       if (this.verbose) console.error(`${response.status}: ${response.data}`);
       throw new Error(`Bad Crossbar /v2/fetch status: ${response.status}`);
-    }
-  }
-
-  /**
-   * POST /store
-   * Store oracle jobs on the crossbar, associated with a queue address
-   * @deprecated Use storeOracleFeed() instead. The store() method uses the legacy v1 format.
-   * @param {string} queueAddress - The address of the queue
-   * @param {IOracleJob[]} jobs - The oracle jobs to store
-   * @returns {Promise<{ cid: string; feedHash: string; queueHex: string }>} - The stored data information
-   */
-  async store(
-    queueAddress: string,
-    jobs: IOracleJob[]
-  ): Promise<{ cid: string; feedHash: string; queueHex: string }> {
-    console.warn(
-      '[Switchboard] Warning: store() is deprecated. Use storeOracleFeed() instead.'
-    );
-    try {
-      // Try to decode the queueAddress to a Buffer so that we can send it in the expected format,
-      // base58, to the Crossbar node.
-      const queue = decodeString(queueAddress);
-      if (!queue) throw new Error(`Unable to parse queue: ${queueAddress}`);
-
-      return await axios
-        .post(
-          `${this.crossbarUrl}/store`,
-          { queue: bs58.encode(queue), jobs },
-          { headers: { 'Content-Type': 'application/json' } }
-        )
-        .then(resp => {
-          if (resp.status === 200) return resp.data;
-          throw new Error(`Bad Crossbar store response: ${resp.status}`);
-        });
-    } catch (err) {
-      if (!axios.isAxiosError(err)) throw err;
-
-      const response = err.response;
-      if (!response) throw err;
-
-      if (this.verbose) console.error(`${response.status}: ${response.data}`);
-      throw new Error(`Bad Crossbar store response: ${response.status}`);
     }
   }
 
@@ -715,40 +629,6 @@ export class CrossbarClient {
   }
 
   /**
-   * POST /gateways/fetch_signatures
-   * @deprecated Use fetchSignaturesConsensus instead
-   * Fetch signatures from oracles for a given set of jobs
-   * @param {FetchSignaturesRequest} request - The request parameters
-   * @param {string} [network] - Optional network parameter (devnet/mainnet). Defaults to mainnet.
-   * @returns {Promise<FeedEvalResponse[]>} - Array of oracle signatures and results
-   */
-  async fetchSignatures(
-    request: FetchSignaturesRequest,
-    network?: string
-  ): Promise<{ responses: FeedEvalResponse[]; failures: string[] }> {
-    console.warn(
-      '[Switchboard] Warning: fetchSignatures() is deprecated. Use fetchSignaturesConsensus() instead.'
-    );
-    try {
-      return await axios
-        .post(`${this.crossbarUrl}/gateways/fetch_signatures`, request, {
-          params: { network },
-        })
-        .then(resp => resp.data);
-    } catch (err) {
-      if (!axios.isAxiosError(err)) throw err;
-
-      const response = err.response;
-      if (!response) throw err;
-
-      if (this.verbose) console.error(`${response.status}: ${response.data}`);
-      throw new Error(
-        `Bad Crossbar fetchOracleSignatures response: ${response.status}`
-      );
-    }
-  }
-
-  /**
    * POST /gateways/fetch_signatures_consensus
    * Fetch consensus signatures from oracles for a given set of feed requests
    * @param {FetchSignaturesConsensusRequest} request - The request parameters with camelCase fields
@@ -1033,34 +913,6 @@ export class CrossbarClient {
 
     return await Promise.all(
       feedHashes.map(feedHash => this.simulateFeed(feedHash, includeReceipts))
-    );
-  }
-
-  /**
-   * Simulate V2 oracle feeds with variable overrides and network selection
-   * @deprecated Use simulateFeeds instead
-   * @param {string[]} feedHashes - The hashes of the V2 feeds to simulate
-   * @param {boolean} [includeReceipts] - Whether to include receipts in the response
-   * @param {Record<string, string>} [variableOverrides] - Variable overrides for the simulation
-   * @param {string} [network] - Network to use for simulation (defaults to "mainnet")
-   * @returns {Promise<CrossbarSimulateProtoResponse[]>} - The simulated feed results
-   */
-  async simulateOracleFeeds(
-    feedHashes: string[],
-    includeReceipts?: boolean,
-    variableOverrides?: Record<string, string>,
-    network?: string
-  ): Promise<CrossbarSimulateProtoResponse[]> {
-    console.warn(
-      '[Switchboard] Warning: simulateOracleFeeds() is deprecated. Use simulateFeeds() instead.'
-    );
-    if (!feedHashes || feedHashes.length === 0)
-      throw new Error('At least one feed is required');
-
-    return await Promise.all(
-      feedHashes.map(feedHash =>
-        this.simulateFeed(feedHash, includeReceipts, variableOverrides, network)
-      )
     );
   }
 

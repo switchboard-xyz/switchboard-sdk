@@ -26,11 +26,14 @@ export * from './switchboard-decimal.js';
 export * from './types.js';
 export * from './types/chains.js';
 export {
+  CrossbarFetchResponse,
+  FetchSignaturesRequest,
   V2ConsensusOracleResponse,
   V2MedianResponse,
   V2UpdateQuery,
   V2UpdateResponse,
 } from './types/crossbar.js';
+export type { FeedEvalResponse } from './types/gateway.js';
 export { sleep } from './utils/async.js';
 export * from './utils/index.js';
 export {
