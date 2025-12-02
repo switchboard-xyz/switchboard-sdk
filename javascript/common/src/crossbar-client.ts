@@ -133,14 +133,14 @@ export class CrossbarClient {
   /**
    * GET /fetch/:feedHash
    * Fetch data from the crossbar using the provided feedHash
+   * @deprecated Use fetchOracleFeed() instead. The fetch() method uses the legacy v1 format.
    * @param {string} feedHash - The hash of the feed to fetch data for
    * @returns {Promise<CrossbarFetchResponse>} - The data fetched from the crossbar
    */
   async fetch(feedHash: string): Promise<CrossbarFetchResponse> {
-    const v2CachedValue = this.oracleFeedCache.get(feedHash);
-    if (v2CachedValue) {
-      throw new Error('V2 cached value found, use fetchOracleFeed instead.');
-    }
+    console.warn(
+      '[Switchboard] Warning: fetch() is deprecated. Use fetchOracleFeed() instead.'
+    );
     try {
       // Check if the feedHash is already in the cache
       const cached = this.feedCache.get(feedHash);
@@ -177,11 +177,6 @@ export class CrossbarClient {
   async fetchOracleFeed(
     feedId: string
   ): Promise<CrossbarOracleFeedFetchResponse> {
-    const legacyProtoCachedValue = this.feedCache.get(feedId);
-    if (legacyProtoCachedValue) {
-      throw new Error('Legacy proto cached value found, use fetch instead.');
-    }
-
     try {
       // Check if the feedId is already in the cache
       const cached = this.oracleFeedCache.get(feedId);
@@ -208,6 +203,7 @@ export class CrossbarClient {
   /**
    * POST /store
    * Store oracle jobs on the crossbar, associated with a queue address
+   * @deprecated Use storeOracleFeed() instead. The store() method uses the legacy v1 format.
    * @param {string} queueAddress - The address of the queue
    * @param {IOracleJob[]} jobs - The oracle jobs to store
    * @returns {Promise<{ cid: string; feedHash: string; queueHex: string }>} - The stored data information
@@ -216,6 +212,9 @@ export class CrossbarClient {
     queueAddress: string,
     jobs: IOracleJob[]
   ): Promise<{ cid: string; feedHash: string; queueHex: string }> {
+    console.warn(
+      '[Switchboard] Warning: store() is deprecated. Use storeOracleFeed() instead.'
+    );
     try {
       // Try to decode the queueAddress to a Buffer so that we can send it in the expected format,
       // base58, to the Crossbar node.
@@ -727,6 +726,9 @@ export class CrossbarClient {
     request: FetchSignaturesRequest,
     network?: string
   ): Promise<{ responses: FeedEvalResponse[]; failures: string[] }> {
+    console.warn(
+      '[Switchboard] Warning: fetchSignatures() is deprecated. Use fetchSignaturesConsensus() instead.'
+    );
     try {
       return await axios
         .post(`${this.crossbarUrl}/gateways/fetch_signatures`, request, {
@@ -1049,6 +1051,9 @@ export class CrossbarClient {
     variableOverrides?: Record<string, string>,
     network?: string
   ): Promise<CrossbarSimulateProtoResponse[]> {
+    console.warn(
+      '[Switchboard] Warning: simulateOracleFeeds() is deprecated. Use simulateFeeds() instead.'
+    );
     if (!feedHashes || feedHashes.length === 0)
       throw new Error('At least one feed is required');
 
