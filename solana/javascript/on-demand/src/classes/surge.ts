@@ -1778,9 +1778,9 @@ export class Surge extends EventEmitter {
 
     // Validate batch interval if provided
     if (batchIntervalMs !== undefined) {
-      if (batchIntervalMs < 10 || batchIntervalMs > 5000) {
+      if (batchIntervalMs < 5 || batchIntervalMs > 10000) {
         throw new Error(
-          'batchIntervalMs must be between 10 and 5000 milliseconds'
+          'batchIntervalMs must be between 5 and 10000 milliseconds'
         );
       }
     }
@@ -2140,9 +2140,9 @@ export class Surge extends EventEmitter {
 
     // Validate batchIntervalMs if provided
     if (batchIntervalMs !== undefined) {
-      if (batchIntervalMs < 10 || batchIntervalMs > 5000) {
+      if (batchIntervalMs < 5 || batchIntervalMs > 10000) {
         throw new Error(
-          'batchIntervalMs must be between 10 and 5000 milliseconds'
+          'batchIntervalMs must be between 5 and 10000 milliseconds'
         );
       }
     }
