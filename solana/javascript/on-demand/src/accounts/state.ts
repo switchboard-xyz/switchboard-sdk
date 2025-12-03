@@ -8,7 +8,7 @@ import { Buffer } from 'buffer';
 
 export interface StateData {
   bump: number;
-  testOnlyDisableMrEnclaveCheck: boolean;
+  teeVerifyMode: number;
   enableStaking: boolean;
   // padding1
   authority: web3.PublicKey;
@@ -99,7 +99,7 @@ export class State {
    * @param {BN} [params.minQuoteVerifyVotes] - The minimum number of votes required to verify a quote.
    * @param {number} [params.permitAdvisory] - The permit advisory value.
    * @param {number} [params.denyAdvisory] - The deny advisory value.
-   * @param {boolean} [params.testOnlyDisableMrEnclaveCheck] - A flag to disable MrEnclave check for testing purposes.
+   * @param {number} [params.teeVerifyMode] - The TEE verification mode (0 = strict, 1 = permissive).
    * @param {web3.PublicKey} [params.switchMint] - The switch mint account.
    * @returns {Promise<web3.TransactionInstruction>} A promise that resolves to the transaction instruction.
    */
@@ -109,7 +109,7 @@ export class State {
     minQuoteVerifyVotes?: BN;
     permitAdvisory?: number;
     denyAdvisory?: number;
-    testOnlyDisableMrEnclaveCheck?: boolean;
+    teeVerifyMode?: number;
     subsidyAmount?: BN;
     switchMint?: web3.PublicKey;
     addCostWl?: web3.PublicKey;
@@ -118,19 +118,15 @@ export class State {
     const state = await this.loadData();
     const queue = params.guardianQueue ?? state.guardianQueue;
     const payer = getNodePayer(this.program);
-    const testOnlyDisableMrEnclaveCheck =
-      params.testOnlyDisableMrEnclaveCheck ??
-      state.testOnlyDisableMrEnclaveCheck;
+    const teeVerifyMode = params.teeVerifyMode ?? state.teeVerifyMode;
     const ix = await this.program.instruction.stateSetConfigs(
       {
         newAuthority: params.newAuthority ?? state.authority,
-        testOnlyDisableMrEnclaveCheck: testOnlyDisableMrEnclaveCheck ? 1 : 0,
+        teeVerifyMode,
         addAdvisory: params.permitAdvisory,
         rmAdvisory: params.denyAdvisory,
-        lutSlot: state.lutSlot,
         subsidyAmount: params.subsidyAmount ?? state.subsidyAmount,
         switchMint: params.switchMint ?? state.switchMint,
-        authority: params.newAuthority ?? state.authority,
         addCostWl: params.addCostWl ?? web3.PublicKey.default,
         rmCostWl: params.rmCostWl ?? web3.PublicKey.default,
       },

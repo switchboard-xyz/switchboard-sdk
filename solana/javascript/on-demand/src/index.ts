@@ -56,10 +56,11 @@
  * ```typescript
  * // Create a persistent feed account
  * const [pullFeed, feedKp] = PullFeed.generate(program);
+ * const { feedId } = await crossbar.storeOracleFeed(oracleFeed);
  * await pullFeed.initIx({
  *   name: "BTC/USD",
  *   queue: queuePubkey,
- *   feedHash: await crossbar.store(queue, jobs),
+ *   feedHash: Buffer.from(feedId.replace('0x', ''), 'hex'),
  * });
  *
  * // Update the feed

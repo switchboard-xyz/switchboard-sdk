@@ -286,6 +286,7 @@ export async function fetchAllLutKeys(
 }
 
 /**
+ * @deprecated Use CrossbarClient.storeOracleFeed() instead. This function uses the legacy v1 format.
  * @param queue Queue pubkey as base58 string
  * @param jobs Array of jobs to store (Oracle Jobs Object)
  * @param crossbarUrl
@@ -300,6 +301,9 @@ export async function storeFeed(
   feedHash: string;
   queueHex: string;
 }> {
+  console.warn(
+    '[Switchboard] Warning: storeFeed() is deprecated. Use CrossbarClient.storeOracleFeed() instead.'
+  );
   const crossbar = crossbarUrl.endsWith('/')
     ? crossbarUrl.slice(0, -1)
     : crossbarUrl;
