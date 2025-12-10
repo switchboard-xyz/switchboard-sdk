@@ -361,15 +361,27 @@ export class CrossbarClient {
   }
 
   /**
-   * GET /randomness/evm/:chainId/:randomnessId
-   * @param param0 - The chain ID and randomness ID to resolve
+   * POST /randomness/evm
+   * Fetch randomness reveal data from the crossbar
+   * @param param0 - The parameters for the randomness request
+   * @param param0.chainId - The EVM chain ID
+   * @param param0.randomnessId - The randomness ID (bytes32 from the contract)
+   * @param param0.timestamp - The roll timestamp from the randomness request
+   * @param param0.minStalenessSeconds - The minimum staleness in seconds
+   * @param param0.oracle - The oracle address that was assigned to the randomness request
    */
   async resolveEVMRandomness({
     chainId,
     randomnessId,
+    timestamp,
+    minStalenessSeconds,
+    oracle,
   }: {
     chainId: number;
     randomnessId: string;
+    timestamp: number;
+    minStalenessSeconds: number;
+    oracle: string;
   }): Promise<{
     encoded: string;
     response: {
@@ -380,8 +392,14 @@ export class CrossbarClient {
   }> {
     try {
       return await axios
-        .get(`${this.crossbarUrl}/randomness/evm/${chainId}/${randomnessId}`)
-        .then(resp => resp.data);
+        .post(`${this.crossbarUrl}/randomness/evm`, {
+          chain_id: chainId.toString(),
+          randomness_id: randomnessId,
+          timestamp,
+          min_staleness_seconds: minStalenessSeconds,
+          oracle: oracle.toLowerCase(),
+        })
+        .then(resp => resp.data?.data ?? resp.data);
     } catch (err) {
       if (!axios.isAxiosError(err)) throw err;
 
@@ -390,7 +408,7 @@ export class CrossbarClient {
 
       if (this.verbose) console.error(`${response.status}: ${response.data}`);
       throw new Error(
-        `Bad Crossbar resolveEVMRandomness response: ${response.status}`
+        `Bad Crossbar resolveEVMRandomness response: ${response.status} - ${JSON.stringify(response.data)}`
       );
     }
   }
