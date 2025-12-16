@@ -66,6 +66,8 @@ pub struct GuardianQuoteVerifyArgs {
     pub oracle: Pubkey,
     /// Authority account public key
     pub authority: Pubkey,
+    /// Oracle queue account public key
+    pub oracle_queue: Pubkey,
     /// Guardian queue account public key
     pub guardian_queue: Pubkey,
     /// Unix timestamp of the verification
@@ -95,6 +97,8 @@ pub struct GuardianQuoteVerifyAccounts {
     pub oracle: Pubkey,
     /// Authority account public key
     pub authority: Pubkey,
+    /// Oracle queue account public key
+    pub oracle_queue: Pubkey,
     /// Guardian queue account public key
     pub guardian_queue: Pubkey,
     /// Global state account public key
@@ -108,6 +112,7 @@ impl ToAccountMetas for GuardianQuoteVerifyAccounts {
             AccountMeta::new(self.guardian, false),
             AccountMeta::new(self.oracle, false),
             AccountMeta::new_readonly(self.authority, true),
+            AccountMeta::new(self.oracle_queue, false),
             AccountMeta::new(self.guardian_queue, false),
             AccountMeta::new_readonly(self.state, false),
             AccountMeta::new_readonly(self.recent_slothashes, false),
@@ -129,6 +134,7 @@ impl GuardianQuoteVerify {
                 guardian: args.guardian,
                 oracle: args.oracle,
                 authority: args.authority,
+                oracle_queue: args.oracle_queue,
                 guardian_queue: args.guardian_queue,
                 state: State::get_pda(),
                 recent_slothashes: slot_hashes::ID,
