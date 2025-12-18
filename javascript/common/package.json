@@ -1,6 +1,6 @@
 {
   "name": "@switchboard-xyz/common",
-  "version": "5.5.1",
+  "version": "5.5.2",
   "description": "common type definitions and utils for interacting with switchboard",
   "license": "MIT",
   "type": "module",
