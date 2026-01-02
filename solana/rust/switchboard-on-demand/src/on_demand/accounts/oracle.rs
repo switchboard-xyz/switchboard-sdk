@@ -239,12 +239,11 @@ impl OracleAccountData {
     }
 
     /// Returns true if the oracle's TEE enclave is verified and valid
-    pub fn is_verified(&self, clock: &Clock) -> bool {
+    /// Note: valid_until is not checked here to match on-chain behavior
+    pub fn is_verified(&self, _clock: &Clock) -> bool {
         match self.enclave.verification_status.into() {
             VerificationStatus::VerificationOverride => true,
-            VerificationStatus::VerificationSuccess => {
-                self.enclave.valid_until > clock.unix_timestamp
-            }
+            VerificationStatus::VerificationSuccess => true,
             _ => false,
         }
     }

@@ -47,10 +47,11 @@ impl Default for Quote {
 }
 impl Quote {
     /// Checks if the quote is currently verified based on clock
-    pub fn is_verified(&self, clock: &Clock) -> bool {
+    /// Note: valid_until is not checked here to match on-chain behavior
+    pub fn is_verified(&self, _clock: &Clock) -> bool {
         match self.verification_status.into() {
             VerificationStatus::VerificationOverride => true,
-            VerificationStatus::VerificationSuccess => self.valid_until > clock.unix_timestamp,
+            VerificationStatus::VerificationSuccess => true,
             _ => false,
         }
     }
