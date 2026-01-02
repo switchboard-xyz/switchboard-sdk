@@ -59,6 +59,7 @@ impl Discriminator for GuardianQuoteVerify {
 }
 
 /// Arguments for building a guardian quote verification instruction
+#[derive(Clone)]
 pub struct GuardianQuoteVerifyArgs {
     /// Guardian account public key
     pub guardian: Pubkey,
@@ -120,6 +121,36 @@ impl ToAccountMetas for GuardianQuoteVerifyAccounts {
     }
 }
 
+/// Legacy account metas for guardian quote verification (without oracle_queue)
+/// Used for backwards compatibility with older on-chain programs
+pub struct GuardianQuoteVerifyAccountsLegacy {
+    /// Guardian account public key
+    pub guardian: Pubkey,
+    /// Oracle account public key
+    pub oracle: Pubkey,
+    /// Authority account public key
+    pub authority: Pubkey,
+    /// Guardian queue account public key
+    pub guardian_queue: Pubkey,
+    /// Global state account public key
+    pub state: Pubkey,
+    /// Recent slot hashes sysvar account
+    pub recent_slothashes: Pubkey,
+}
+
+impl ToAccountMetas for GuardianQuoteVerifyAccountsLegacy {
+    fn to_account_metas(&self, _: Option<bool>) -> Vec<AccountMeta> {
+        vec![
+            AccountMeta::new(self.guardian, false),
+            AccountMeta::new(self.oracle, false),
+            AccountMeta::new_readonly(self.authority, true),
+            AccountMeta::new(self.guardian_queue, false),
+            AccountMeta::new_readonly(self.state, false),
+            AccountMeta::new_readonly(self.recent_slothashes, false),
+        ]
+    }
+}
+
 impl GuardianQuoteVerify {
     /// Builds a guardian quote verification instruction
     pub fn build_ix(args: GuardianQuoteVerifyArgs) -> Result<Instruction, OnDemandError> {
@@ -135,6 +166,39 @@ impl GuardianQuoteVerify {
                 oracle: args.oracle,
                 authority: args.authority,
                 oracle_queue: args.oracle_queue,
+                guardian_queue: args.guardian_queue,
+                state: State::get_pda(),
+                recent_slothashes: slot_hashes::ID,
+            },
+            &GuardianQuoteVerifyParams {
+                timestamp: args.timestamp,
+                mr_enclave: args.mr_enclave,
+                idx: args.idx,
+                ed25519_key: args.ed25519_key,
+                secp256k1_key: args.secp256k1_key,
+                slot: args.slot,
+                signature: args.signature,
+                recovery_id: args.recovery_id,
+                advisories: args.advisories,
+            },
+        ))
+    }
+
+    /// Builds a legacy guardian quote verification instruction without oracle_queue
+    /// Used for backwards compatibility with older on-chain programs that don't have
+    /// the oracle_queue account in the instruction
+    pub fn build_ix_legacy(args: GuardianQuoteVerifyArgs) -> Result<Instruction, OnDemandError> {
+        let pid = if crate::utils::is_devnet() {
+            get_sb_program_id("devnet")
+        } else {
+            get_sb_program_id("mainnet")
+        };
+        Ok(crate::utils::build_ix(
+            &pid,
+            &GuardianQuoteVerifyAccountsLegacy {
+                guardian: args.guardian,
+                oracle: args.oracle,
+                authority: args.authority,
                 guardian_queue: args.guardian_queue,
                 state: State::get_pda(),
                 recent_slothashes: slot_hashes::ID,
