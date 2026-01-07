@@ -836,6 +836,35 @@ impl AutoSourceCalculator {
         None
     }
 
+    /// Get full entry from AUTO cache including secondary source info.
+    /// Use this when you need secondary source for variance checking.
+    pub fn get_entry_from_cache_sync(&self, pair: &Pair) -> Option<WeightedSourceEntry> {
+        use crate::hub::AUTO_SOURCE_CACHE;
+
+        // Check the cache for exact pair
+        if let Some(entry) = AUTO_SOURCE_CACHE.get(pair) {
+            if !entry.is_expired() {
+                return Some(entry.clone());
+            }
+        }
+
+        // If pair has a USD-equivalent quote (USDT, USDC, etc), check USD cache
+        if is_usd_equivalent(&pair.quote) && pair.quote != "USD" {
+            let usd_pair = Pair {
+                base: pair.base.clone(),
+                quote: "USD".to_string(),
+            };
+
+            if let Some(entry) = AUTO_SOURCE_CACHE.get(&usd_pair) {
+                if !entry.is_expired() {
+                    return Some(entry.clone());
+                }
+            }
+        }
+
+        None
+    }
+
     /// Calculate AUTO score for a source/pair combination with dynamic normalization
     fn calculate_auto_score(&self, source: Source, pair: &Pair, max_values: &(f64, f64, f64, f64)) -> f64 {
         // Force Pyth to always win for its native stablecoin pairs

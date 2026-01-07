@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod bip_correction;
+pub mod candle;
 pub mod exchange_config;
 pub mod exchanges;
 pub mod feed_metadata;
@@ -43,3 +44,8 @@ pub use message_rate::{start_message_rate_updater, MESSAGE_COUNTER, MESSAGE_RATE
 
 // Re-export feed metadata
 pub use feed_metadata::{FeedMetadata, get_or_create_feed_metadata, precompute_all_feed_metadata, clear_feed_metadata_cache};
+
+// Re-export candle types
+pub use candle::{RawCandle, SignedCandle, StreamingAccumulator, CANDLE_ACCUMULATORS, WINDOW_MS, MAX_DT_MS, align_to_window};
+#[cfg(feature = "candle-db")]
+pub use candle::{create_candle_pool, fetch_candles, persist_candle};

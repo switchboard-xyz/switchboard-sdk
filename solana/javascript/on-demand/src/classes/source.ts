@@ -8,6 +8,7 @@ export enum Source {
   AUTO = 6,
   PYTH = 7,
   GATE = 8,
+  TITAN = 9,
 }
 
 // eslint-disable-next-line @typescript-eslint/no-namespace

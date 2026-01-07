@@ -39,9 +39,9 @@ fn create_oracle_job_for_feed(symbol: &Pair, source: Option<Source>) -> OracleJo
         Some(Source::Bybit) => 3,
         Some(Source::Coinbase) => 4,
         Some(Source::Bitget) => 5,
-        Some(Source::Pyth) => 6,
-        Some(Source::Titan) => 7,
+        Some(Source::Pyth) => 7,
         Some(Source::Gate) => 8,
+        Some(Source::Titan) => 9,
         Some(Source::Weighted) | Some(Source::Auto) | None => 0, // Weighted/Auto median uses 0
     };
 
