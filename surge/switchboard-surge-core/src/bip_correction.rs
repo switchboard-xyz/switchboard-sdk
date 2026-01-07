@@ -318,6 +318,7 @@ fn exchange_name(source: Source) -> &'static str {
         Source::Okx => "OKX",
         Source::Coinbase => "Coinbase",
         Source::Bitget => "Bitget",
+        Source::Gate => "Gate.io",
         Source::Pyth => "Pyth",
         Source::Titan => "Titan",
         Source::Weighted => "Weighted",

@@ -7,6 +7,7 @@ export enum Source {
   BITGET = 5,
   AUTO = 6,
   PYTH = 7,
+  GATE = 8,
 }
 
 // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -32,6 +33,8 @@ export namespace Source {
         return 'AUTO';
       case Source.PYTH:
         return 'PYTH';
+      case Source.GATE:
+        return 'GATE';
       default:
         return 'UNKNOWN';
     }
@@ -58,6 +61,9 @@ export namespace Source {
         return Source.AUTO;
       case 'PYTH':
         return Source.PYTH;
+      case 'GATE':
+      case 'GATE.IO':
+        return Source.GATE;
       default:
         throw new Error(`Unknown source: ${source}`);
     }

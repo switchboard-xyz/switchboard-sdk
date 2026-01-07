@@ -854,6 +854,7 @@ impl AutoSourceCalculator {
             Source::Okx => pair.as_okx_str(),
             Source::Coinbase => pair.as_coinbase_str().replace("/", "-"),
             Source::Bitget => pair.as_bitget_str(),
+            Source::Gate => pair.as_gate_str(),
             Source::Pyth => pair.as_pyth_str(),
             Source::Titan => pair.as_titan_str(),
             Source::Weighted | Source::Auto => return 0.0,
@@ -997,6 +998,7 @@ impl AutoSourceCalculator {
                                 Source::Okx => actual_pair.as_okx_str(),
                                 Source::Coinbase => actual_pair.as_coinbase_str().replace("/", "-"),
                                 Source::Bitget => actual_pair.as_bitget_str(),
+                                Source::Gate => actual_pair.as_gate_str(),
                                 _ => continue,
                             };
                             
@@ -1185,6 +1187,7 @@ impl AutoSourceCalculator {
                             Source::Okx => best_pair.as_okx_str(),
                             Source::Coinbase => best_pair.as_coinbase_str().replace("/", "-"),
                             Source::Bitget => best_pair.as_bitget_str(),
+                            Source::Gate => best_pair.as_gate_str(),
                             _ => String::new(),
                         };
                         let spread = volume_fetcher.get_spread(*best_source, &symbol).unwrap_or(0.0);
@@ -1208,6 +1211,7 @@ impl AutoSourceCalculator {
                                 Source::Okx => sec_pair.as_okx_str(),
                                 Source::Coinbase => sec_pair.as_coinbase_str().replace("/", "-"),
                                 Source::Bitget => sec_pair.as_bitget_str(),
+                                Source::Gate => sec_pair.as_gate_str(),
                                 _ => String::new(),
                             };
                             let sec_spread = volume_fetcher.get_spread(*sec_source, &sec_symbol).unwrap_or(0.0);

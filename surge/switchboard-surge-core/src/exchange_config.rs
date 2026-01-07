@@ -43,6 +43,12 @@ pub static EXCHANGE_REGISTRY: Lazy<HashMap<Source, ExchangeConfig>> = Lazy::new(
             allowed_quotes: Some(vec!["USDT", "USDC", "USD", "EUR"]),
         },
         ExchangeConfig {
+            source: Source::Gate,
+            enabled: true,
+            weight: 2,
+            allowed_quotes: Some(vec!["USDT", "USDC", "USD"]),
+        },
+        ExchangeConfig {
             source: Source::Pyth,
             enabled: true,
             weight: 1,
@@ -96,6 +102,7 @@ pub fn get_cached_pairs_if_enabled(source: Source) -> Result<Vec<crate::Pair>, a
         Source::Okx => crate::exchanges::okx::get_cached_pairs(),
         Source::Coinbase => crate::exchanges::coinbase::get_cached_pairs(),
         Source::Bitget => crate::exchanges::bitget::get_cached_pairs(),
+        Source::Gate => crate::exchanges::gate::get_cached_pairs(),
         Source::Pyth => crate::exchanges::pyth::get_cached_pairs(),
         Source::Titan => Ok(Vec::new()), // Disabled
         Source::Weighted => Ok(Vec::new()),

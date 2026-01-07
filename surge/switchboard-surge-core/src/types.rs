@@ -10,6 +10,7 @@ pub enum Source {
     Okx,
     Coinbase,
     Bitget,
+    Gate,
     Pyth,
     Titan,
     Weighted, // Kept for backwards compatibility, will use AUTO logic internally
@@ -24,6 +25,7 @@ impl Source {
             Source::Okx => "OKX",
             Source::Coinbase => "Coinbase",
             Source::Bitget => "Bitget",
+            Source::Gate => "Gate.io",
             Source::Pyth => "Pyth",
             Source::Titan => "Titan",
             Source::Weighted => "WEIGHTED",

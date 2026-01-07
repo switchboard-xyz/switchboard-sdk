@@ -99,6 +99,7 @@ impl VolumeFetcher {
             Source::Okx => symbol.as_okx_str(),
             Source::Coinbase => symbol.as_coinbase_str().replace("/", "-"),
             Source::Bitget => symbol.as_bitget_str(),
+            Source::Gate => symbol.as_gate_str(),
             Source::Pyth => symbol.as_pyth_str(),
             Source::Titan => symbol.as_titan_str(),
             Source::Weighted | Source::Auto => return 0.0,
@@ -149,6 +150,7 @@ impl VolumeFetcher {
                     Source::Okx => test_pair.as_okx_str(),
                     Source::Coinbase => test_pair.as_coinbase_str().replace("/", "-"),
                     Source::Bitget => test_pair.as_bitget_str(),
+                    Source::Gate => test_pair.as_gate_str(),
                     Source::Pyth => test_pair.as_pyth_str(),
                     Source::Titan => test_pair.as_titan_str(),
                     Source::Weighted | Source::Auto => continue,
@@ -245,6 +247,7 @@ impl VolumeFetcher {
             Source::Okx => symbol.as_okx_str(),
             Source::Coinbase => symbol.as_coinbase_str().replace("/", "-"),
             Source::Bitget => symbol.as_bitget_str(),
+            Source::Gate => symbol.as_gate_str(),
             Source::Pyth => symbol.as_pyth_str(),
             Source::Titan => symbol.as_titan_str(),
             Source::Weighted | Source::Auto => {
@@ -290,6 +293,7 @@ impl VolumeFetcher {
             Source::Okx => symbol.as_okx_str(),
             Source::Coinbase => symbol.as_coinbase_str().replace("/", "-"), // Coinbase uses BTC-USD format
             Source::Bitget => symbol.as_bitget_str(),
+            Source::Gate => symbol.as_gate_str(),
             Source::Pyth => symbol.as_pyth_str(),
             Source::Titan => symbol.as_titan_str(),
             Source::Weighted | Source::Auto => {
@@ -382,6 +386,20 @@ impl VolumeFetcher {
                 }
                 Err(_) => {
                     tracing::warn!("Timeout fetching volumes from Bitget");
+                    (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
+                }
+            },
+            Source::Gate => match tokio::time::timeout(
+                Duration::from_secs(5),
+                self.fetch_gate_volumes()
+            ).await {
+                Ok(Ok((vols, counts, spreads, bid_sizes, ask_sizes))) => (vols, counts, spreads, bid_sizes, ask_sizes),
+                Ok(Err(e)) => {
+                    tracing::warn!("Failed to fetch volumes from Gate.io: {}", e);
+                    (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
+                }
+                Err(_) => {
+                    tracing::warn!("Timeout fetching volumes from Gate.io");
                     (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
                 }
             },
@@ -745,6 +763,55 @@ impl VolumeFetcher {
         }
 
         Ok((volume_map, HashMap::new(), spread_map, bid_size_map, ask_size_map))  // Bitget doesn't provide trade counts  // Bitget doesn't provide trade counts
+    }
+
+    /// Fetch all volumes, spreads and market depth from Gate.io
+    pub async fn fetch_gate_volumes(&self) -> Result<(HashMap<String, f64>, HashMap<String, u64>, HashMap<String, f64>, HashMap<String, f64>, HashMap<String, f64>)> {
+        let response = self.client
+            .get("https://api.gateio.ws/api/v4/spot/tickers")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!("Gate.io API error: {}", response.status()));
+        }
+
+        #[derive(Deserialize)]
+        struct GateTicker {
+            currency_pair: String,
+            #[serde(default)]
+            quote_volume: String,
+            #[serde(default)]
+            lowest_ask: String,
+            #[serde(default)]
+            highest_bid: String,
+        }
+
+        let tickers: Vec<GateTicker> = response.json().await?;
+        let mut volume_map = HashMap::new();
+        let mut spread_map = HashMap::new();
+        let mut bid_size_map = HashMap::new();
+        let mut ask_size_map = HashMap::new();
+
+        for ticker in tickers {
+            // Volume
+            if let Ok(volume) = ticker.quote_volume.parse::<f64>() {
+                volume_map.insert(ticker.currency_pair.clone(), volume);
+            }
+
+            // Calculate spread percentage
+            if let (Ok(bid), Ok(ask)) = (ticker.highest_bid.parse::<f64>(), ticker.lowest_ask.parse::<f64>()) {
+                if bid > 0.0 && ask > 0.0 {
+                    let spread_pct = ((ask - bid) / ask) * 100.0;
+                    spread_map.insert(ticker.currency_pair.clone(), spread_pct);
+                }
+            }
+
+            // Gate.io tickers don't include bid/ask sizes directly
+            // We'd need the order book endpoint for depth data
+        }
+
+        Ok((volume_map, HashMap::new(), spread_map, bid_size_map, ask_size_map))  // Gate.io doesn't provide trade counts in ticker endpoint
     }
 }
 

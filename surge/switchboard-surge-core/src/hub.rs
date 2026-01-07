@@ -1,5 +1,5 @@
 use crate::{
-    exchanges::{BinanceStream, BybitStream, CoinbaseStream, OkxStream, BitgetStream, PythStream},
+    exchanges::{BinanceStream, BybitStream, CoinbaseStream, OkxStream, BitgetStream, GateStream, PythStream},
     pair::Pair,
     traits::TickerStream,
     types::{MapKey, PxEntry, Source, Tick},
@@ -87,6 +87,7 @@ pub struct SurgeHub {
     okx: Option<Arc<tokio::sync::Mutex<OkxStream>>>,
     coinbase: Option<Arc<tokio::sync::Mutex<CoinbaseStream>>>,
     bitget: Option<Arc<tokio::sync::Mutex<BitgetStream>>>,
+    gate: Option<Arc<tokio::sync::Mutex<GateStream>>>,
     pyth: Option<Arc<tokio::sync::Mutex<PythStream>>>,
     // titan: Option<Arc<tokio::sync::Mutex<TitanStream>>>, // Disabled
 
@@ -164,6 +165,7 @@ impl SurgeHub {
             okx: None,
             coinbase: None,
             bitget: None,
+            gate: None,
             pyth: None,
             // titan: None, // Disabled
             websocket_active_pairs: Arc::new(DashMap::new()),
@@ -259,7 +261,24 @@ impl SurgeHub {
         } else {
             warn!("⚠️ PRE-POPULATE: Failed to get Bitget cached pairs");
         }
-        
+
+        // Gate.io
+        if let Ok(pairs) = crate::exchanges::gate::get_cached_pairs() {
+            let count = pairs.len();
+            for pair in pairs {
+                let key = (Source::Gate, pair.clone());
+                self.prices.entry(key).or_insert_with(|| {
+                    let tick = Tick::default();
+                    let (tx, _) = watch::channel(tick);
+                    (tick, tx)
+                });
+            }
+            info!("✅ PRE-POPULATE: Added {} Gate.io pairs", count);
+            total_pairs += count;
+        } else {
+            warn!("⚠️ PRE-POPULATE: Failed to get Gate.io cached pairs");
+        }
+
         info!("✅ PRE-POPULATE: Complete! Total {} pairs in hub.prices", total_pairs);
         
         // Log some sample pairs for verification
@@ -337,6 +356,14 @@ impl SurgeHub {
             Source::Titan => {
                 // Disabled - Titan module kept for future use
                 info!("Titan exchange is disabled");
+            }
+            Source::Gate => {
+                if self.gate.is_none() {
+                    info!("Starting Gate.io stream");
+                    let stream = GateStream::new().await?;
+                    self.gate = Some(Arc::new(tokio::sync::Mutex::new(stream)));
+                    self.spawn_exchange_loop(source).await?;
+                }
             }
         }
         Ok(())
@@ -787,12 +814,18 @@ impl SurgeHub {
             Source::Titan => {
                 // Disabled - Titan module kept for future use
             }
+            Source::Gate => {
+                if let Some(stream) = &self.gate {
+                    let mut stream_guard = stream.lock().await;
+                    stream_guard.unlisten(pair)?;
+                }
+            }
             Source::Weighted => {
                 // For WEIGHTED, find the actual source being used
                 let (actual_source, actual_pair) = crate::weighted_source::WeightedSourceCalculator::new()
                     .get_from_cache_sync(pair)
                     .ok_or_else(|| anyhow!("No weighted source found for {}", pair.as_str()))?;
-                
+
                 // Unsubscribe from the actual exchange (avoid recursion by handling directly)
                 match actual_source {
                     Source::Binance if self.binance.is_some() => {
@@ -821,6 +854,10 @@ impl SurgeHub {
                     }
                     Source::Titan => {
                         // Disabled - Titan module kept for future use
+                    }
+                    Source::Gate if self.gate.is_some() => {
+                        let mut stream_guard = self.gate.as_ref().unwrap().lock().await;
+                        stream_guard.unlisten(&actual_pair)?;
                     }
                     _ => return Err(anyhow!("Exchange not available for weighted source")),
                 }
@@ -880,9 +917,13 @@ impl SurgeHub {
                     Source::Titan => {
                         // Disabled - Titan module kept for future use
                     }
+                    Source::Gate if self.gate.is_some() => {
+                        let mut stream_guard = self.gate.as_ref().unwrap().lock().await;
+                        stream_guard.unlisten(&actual_pair)?;
+                    }
                     _ => return Err(anyhow!("Exchange not available for AUTO source")),
                 }
-                
+
                 // Remove from cache
                 let key = (actual_source, actual_pair);
                 self.prices.remove(&key);
@@ -1400,6 +1441,7 @@ impl SurgeHub {
                 Source::Bitget => self.bitget.is_some(),
                 Source::Pyth => self.pyth.is_some(),
                 Source::Titan => false, // Disabled
+                Source::Gate => self.gate.is_some(),
                 Source::Weighted | Source::Auto => unreachable!(), // Already handled above
             },
             _ => false, // Not in active exchanges
@@ -1450,6 +1492,12 @@ impl SurgeHub {
                 }
                 Source::Titan => {
                     // Disabled - Titan module kept for future use
+                }
+                Source::Gate => {
+                    if let Some(stream) = &self.gate {
+                        let mut stream_guard = stream.lock().await;
+                        stream_guard.listen(pair.clone())?;
+                    }
                 }
                 Source::Weighted | Source::Auto => unreachable!(), // Already handled above
             },
@@ -1546,6 +1594,20 @@ impl SurgeHub {
                         info!("✅ Bitget stream created successfully - internal processing will handle updates");
                     }
                     Err(e) => error!("❌ Failed to start Bitget: {}", e),
+                }
+            }
+        );
+
+        // Spawn Gate.io
+        crate::runtime_separation::spawn_on_ingestion_named(
+            "gate-startup",
+            async move {
+                info!("🔵 Starting Gate.io exchange...");
+                match GateStream::new().await {
+                    Ok(_stream) => {
+                        info!("✅ Gate.io stream created successfully - internal processing will handle updates");
+                    }
+                    Err(e) => error!("❌ Failed to start Gate.io: {}", e),
                 }
             }
         );

@@ -41,6 +41,7 @@ fn create_oracle_job_for_feed(symbol: &Pair, source: Option<Source>) -> OracleJo
         Some(Source::Bitget) => 5,
         Some(Source::Pyth) => 6,
         Some(Source::Titan) => 7,
+        Some(Source::Gate) => 8,
         Some(Source::Weighted) | Some(Source::Auto) | None => 0, // Weighted/Auto median uses 0
     };
 
@@ -152,6 +153,7 @@ fn source_display_name(source: Source) -> &'static str {
         Source::Bybit => "BYBIT",
         Source::Coinbase => "COINBASE",
         Source::Bitget => "BITGET",
+        Source::Gate => "GATE",
         Source::Pyth => "PYTH",
         Source::Titan => "TITAN",
         Source::Weighted => "WEIGHTED",

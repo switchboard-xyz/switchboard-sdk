@@ -229,6 +229,7 @@ impl RestManager {
             Source::Okx => self.poll_okx(symbols).await,
             Source::Coinbase => self.poll_coinbase(symbols).await,
             Source::Bitget => self.poll_bitget(symbols).await,
+            Source::Gate => self.poll_gate(symbols).await,
             Source::Pyth => self.poll_pyth(symbols).await,
             Source::Titan => {
                 // Titan uses its own polling mechanism
@@ -625,6 +626,93 @@ impl RestManager {
         }
         
         debug!("REST: Bitget updated {} prices (skipped {} WebSocket-active)",
+            updated_count, skipped_websocket);
+
+        Ok(())
+    }
+
+    /// Poll Gate.io REST API for all symbols at once
+    async fn poll_gate(&self, symbols: &HashSet<String>) -> Result<()> {
+        debug!("REST: Polling Gate.io for {} symbols", symbols.len());
+
+        // Gate.io public API endpoint for spot tickers
+        let response = self.client
+            .get("https://api.gateio.ws/api/v4/spot/tickers")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!("Gate.io API error: {}", response.status()));
+        }
+
+        #[derive(Deserialize)]
+        struct GateTicker {
+            currency_pair: String,
+            last: String,
+        }
+
+        let tickers: Vec<GateTicker> = response.json().await?;
+
+        // Symbols are in Gate.io format (e.g., "BTC_USDT")
+        let gate_symbols = symbols.clone();
+
+        // Get the symbol-to-pair mapping from cached exchange info
+        let gate_mapping = crate::exchanges::gate::get_cached_pairs()
+            .unwrap_or_else(|_| {
+                error!("Gate.io exchange info not cached! REST manager may miss symbols.");
+                Vec::new()
+            });
+
+        // Convert to HashMap for O(1) lookup
+        let symbol_to_pair: HashMap<String, Pair> = gate_mapping
+            .into_iter()
+            .map(|pair| (pair.as_gate_str(), pair))
+            .collect();
+
+        // Update cache
+        let hub = crate::hub::SurgeHub::global();
+        let received_at = crate::clock_sync::get_corrected_timestamp_ms();
+        let mut updated_count = 0;
+        let mut skipped_websocket = 0;
+
+        for ticker in tickers {
+            if gate_symbols.contains(&ticker.currency_pair) {
+                // Look up in our mapping
+                if let Some(pair) = symbol_to_pair.get(&ticker.currency_pair) {
+                    // Parse price
+                    if let Ok(price) = ticker.last.parse::<Decimal>() {
+                        let tick = Tick {
+                            price,
+                            event_ts: received_at,  // Gate.io ticker response doesn't include timestamp
+                            seen_at: received_at,
+                            verified_at: received_at,
+                        };
+
+                        // Handle WebSocket vs REST logic
+                        if hub.is_websocket_active(Source::Gate, pair) {
+                            // WebSocket is active - only update verified_at if conditions met
+                            if let Ok(Some(existing)) = hub.latest(Source::Gate, pair) {
+                                // Only update verified_at if:
+                                // 1. Price matches (data validity confirmed)
+                                // 2. REST timestamp is more recent than cached verified_at
+                                if existing.price == price && received_at > existing.verified_at {
+                                    hub.update_verified_at(Source::Gate, pair, received_at);
+                                    debug!("REST updated verified_at for WS symbol {} ({} -> {})",
+                                           pair.as_str(), existing.verified_at, received_at);
+                                }
+                            }
+                            skipped_websocket += 1;
+                        } else {
+                            // No WebSocket - REST fully manages this symbol
+                            hub.update(Source::Gate, pair.clone(), tick).await;
+                            updated_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        debug!("REST: Gate.io updated {} prices (skipped {} WebSocket-active)",
             updated_count, skipped_websocket);
 
         Ok(())

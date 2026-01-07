@@ -4,6 +4,7 @@ pub mod bybit;
 pub mod coinbase;
 pub mod okx;
 pub mod bitget;
+pub mod gate;
 pub mod pyth;
 // pub mod titan; // Disabled - kept for future use
 pub mod connection_state;
@@ -14,6 +15,7 @@ pub use bybit::BybitStream;
 pub use coinbase::CoinbaseStream;
 pub use okx::OkxStream;
 pub use bitget::BitgetStream;
+pub use gate::GateStream;
 pub use pyth::PythStream;
 // pub use titan::TitanStream; // Disabled - kept for future use
 pub use connection_state::ConnectionState;
