@@ -34,6 +34,7 @@ import {
   FeedHash,
   NonEmptyArrayUtils,
 } from '@switchboard-xyz/common';
+import { LegacyCrossbarClient } from '@switchboard-xyz/common-legacy';
 import { Buffer } from 'buffer';
 
 export interface CurrentResult {
@@ -375,7 +376,8 @@ export class PullFeed {
 
     const configs = await this.loadConfigs();
     const feedHash = Buffer.from(configs.feedHash);
-    this.jobs = await crossbarClient
+    const legacyClient = new LegacyCrossbarClient(crossbarClient.crossbarUrl);
+    this.jobs = await legacyClient
       .fetch(feedHash.toString('hex'))
       .then(resp => resp.jobs);
     return this.jobs!;
@@ -800,10 +802,11 @@ export class PullFeed {
       } else if (!queue.equals(data.queue)) {
         throw new Error('All feeds must be on the same queue');
       }
+      const legacyClient = new LegacyCrossbarClient(crossbarClient.crossbarUrl);
       feedConfigs.push({
         maxVariance: data.maxVariance.toNumber() / 1e9,
         minResponses: data.minResponses,
-        jobs: await crossbarClient
+        jobs: await legacyClient
           .fetch(Buffer.from(data.feedHash).toString('hex'))
           .then(resp => resp.jobs),
       });

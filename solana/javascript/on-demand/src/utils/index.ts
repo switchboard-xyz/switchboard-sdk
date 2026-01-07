@@ -11,6 +11,7 @@ import type { Program } from '@coral-xyz/anchor-31';
 import { web3 } from '@coral-xyz/anchor-31';
 import type { IOracleJob } from '@switchboard-xyz/common';
 import { CrossbarClient } from '@switchboard-xyz/common';
+import { LegacyCrossbarClient } from '@switchboard-xyz/common-legacy';
 import { Buffer } from 'buffer';
 
 type Account = {
@@ -308,7 +309,7 @@ export async function storeFeed(
     ? crossbarUrl.slice(0, -1)
     : crossbarUrl;
 
-  const x = new CrossbarClient(crossbar);
+  const x = new LegacyCrossbarClient(crossbar);
   return await x.store(queue, jobs);
 }
 
