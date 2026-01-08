@@ -22,13 +22,15 @@ pub mod types;
 pub mod db;
 
 // Re-export core types
-pub use buffer::{StreamingAccumulator, CANDLE_ACCUMULATORS};
+pub use buffer::{
+    get_accumulator_snapshot, AccumulatorSnapshot, StreamingAccumulator, CANDLE_ACCUMULATORS,
+};
 pub use types::{RawCandle, SignedCandle};
 
 #[cfg(feature = "candle-db")]
 pub use db::{
-    create_candle_pool, fetch_candles, fetch_candles_all_exchanges, get_global_candle_pool,
-    persist_candle,
+    create_candle_pool, fetch_candles, fetch_candles_all_exchanges,
+    fetch_overlapping_finalized_candles, get_global_candle_pool, persist_candle,
 };
 
 /// Candle window duration in milliseconds (5 minutes)

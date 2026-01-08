@@ -30,6 +30,53 @@ pub fn accumulator_key(exchange: &str, pair: &str) -> String {
     format!("{}:{}", exchange, pair)
 }
 
+/// Snapshot of an in-progress accumulator for TWAP calculation.
+///
+/// Contains the minimum data needed to compute the accumulator's contribution
+/// to a TWAP query, including clipping and hold-last-price extension.
+#[derive(Clone, Debug)]
+pub struct AccumulatorSnapshot {
+    /// Window start timestamp (aligned to 5-minute boundary)
+    pub window_start_ms: u64,
+    /// Timestamp of the last price tick received
+    pub last_event_ts: u64,
+    /// Last price seen (used for hold-last-price extension)
+    pub last_price: Decimal,
+    /// Sum of (price × dt_ms) for TWAP calculation
+    pub time_weighted_sum: Decimal,
+    /// Total observed duration in milliseconds
+    pub observed_duration_ms: u64,
+}
+
+/// Get snapshot of the in-progress accumulator for TWAP calculation.
+///
+/// Returns `None` if:
+/// - No accumulator exists for this (exchange, pair)
+/// - The accumulator is in an invalid state (no observed data yet)
+///
+/// # Arguments
+/// * `exchange` - Exchange name (e.g., "Binance", "OKX")
+/// * `pair` - Trading pair (e.g., "BTC/FDUSD")
+pub fn get_accumulator_snapshot(exchange: &str, pair: &str) -> Option<AccumulatorSnapshot> {
+    let key = accumulator_key(exchange, pair);
+    let acc = CANDLE_ACCUMULATORS.get(&key)?;
+
+    // Snapshot safety: require valid observed data
+    // - observed_duration_ms > 0: has accumulated some time
+    // - last_ts > window_start_ms: avoids weird startup states
+    if acc.observed_duration_ms == 0 || acc.last_ts <= acc.window_start_ms {
+        return None;
+    }
+
+    Some(AccumulatorSnapshot {
+        window_start_ms: acc.window_start_ms,
+        last_event_ts: acc.last_ts,
+        last_price: acc.last_price,
+        time_weighted_sum: acc.time_weighted_sum,
+        observed_duration_ms: acc.observed_duration_ms,
+    })
+}
+
 /// Streaming accumulator for a single (exchange, pair) combination.
 ///
 /// Uses O(1) memory per pair regardless of tick rate by:

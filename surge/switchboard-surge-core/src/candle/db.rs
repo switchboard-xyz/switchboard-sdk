@@ -284,6 +284,54 @@ pub async fn fetch_candles(
     Ok(rows.into_iter().map(SignedCandle::from).collect())
 }
 
+/// Fetch overlapping FINALIZED candles for an (exchange, pair) for TWAP calculation.
+///
+/// This function is specifically designed for TWAP queries where:
+/// - `since_ms`: Start of the lookback period (may not be on a window boundary)
+/// - `now_ms_floor_5m`: End boundary for finalized candles (floored to 5-min boundary)
+///
+/// **Critical Invariant**: DB fetch MUST NOT include the current open window.
+/// The accumulator is the sole source for open-window data.
+///
+/// **Inclusion Rule**: A candle is included if:
+/// - `window_end_ms > since_ms` (overlaps the start of lookback)
+/// - `window_start_ms < now_ms_floor_5m` (overlaps the end boundary)
+///
+/// This ensures we only get finalized (closed) candles, never the current open window.
+/// Returns candles ordered by window_start_ms ascending (oldest first).
+pub async fn fetch_overlapping_finalized_candles(
+    pool: &PgPool,
+    exchange: &str,
+    pair: &str,
+    since_ms: u64,
+    now_ms_floor_5m: u64,
+) -> Result<Vec<SignedCandle>> {
+    let rows: Vec<CandleRow> = sqlx::query_as(
+        r#"
+        SELECT
+            time, exchange, pair, window_start_ms, window_end_ms,
+            time_weighted_sum, observed_duration_ms, sampled_median,
+            tick_count, open_price, close_price, high_price, low_price,
+            session_id, coverage_pct, oracle_pubkey, signature, signed_at_ms
+        FROM candles
+        WHERE exchange = $1
+          AND pair = $2
+          AND window_end_ms > $3
+          AND window_start_ms < $4
+        ORDER BY window_start_ms ASC
+        "#,
+    )
+    .bind(exchange)
+    .bind(pair)
+    .bind(since_ms as i64)
+    .bind(now_ms_floor_5m as i64)
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch overlapping finalized candles")?;
+
+    Ok(rows.into_iter().map(SignedCandle::from).collect())
+}
+
 /// Fetch candles for a pair across ALL exchanges since a given timestamp.
 ///
 /// Useful for TWAP aggregation where we want data from multiple exchanges.
