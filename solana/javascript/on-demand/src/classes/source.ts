@@ -7,8 +7,8 @@ export enum Source {
   BITGET = 5,
   AUTO = 6,
   PYTH = 7,
-  GATE = 8,
-  TITAN = 9,
+  TITAN = 8,
+  GATE = 9,
 }
 
 // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -34,6 +34,8 @@ export namespace Source {
         return 'AUTO';
       case Source.PYTH:
         return 'PYTH';
+      case Source.TITAN:
+        return 'TITAN';
       case Source.GATE:
         return 'GATE';
       default:
@@ -62,6 +64,8 @@ export namespace Source {
         return Source.AUTO;
       case 'PYTH':
         return Source.PYTH;
+      case 'TITAN':
+        return Source.TITAN;
       case 'GATE':
       case 'GATE.IO':
         return Source.GATE;
