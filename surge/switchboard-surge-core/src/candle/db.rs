@@ -433,32 +433,6 @@ pub async fn count_candles(
     Ok(count.0)
 }
 
-/// Delete candles older than the retention period.
-///
-/// Uses the `time` column (window_start) for deletion, which aligns with
-/// TimescaleDB's hypertable partitioning for efficient bulk deletes.
-///
-/// # Invariant: Retention vs TWAP Lookback
-///
-/// We delete by `time` (window_start_ms), while TWAP queries fetch by
-/// `window_end_ms >= since_ms`. This is safe because:
-/// - Retention (12h 15m) > max TWAP lookback (12h)
-/// - Therefore, no candle whose window_end overlaps an active TWAP range
-///   can be deleted prematurely.
-///
-/// Returns the number of rows deleted.
-pub async fn delete_old_candles(pool: &PgPool, retention_minutes: i64) -> Result<u64> {
-    // Use database time (NOW()) instead of system time to avoid clock skew
-    // issues in distributed/containerized deployments
-    let result = sqlx::query("DELETE FROM candles WHERE time < (NOW() - $1 * INTERVAL '1 minute')")
-        .bind(retention_minutes)
-        .execute(pool)
-        .await
-        .context("Failed to delete old candles")?;
-
-    Ok(result.rows_affected())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
