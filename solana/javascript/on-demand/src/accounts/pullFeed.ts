@@ -307,7 +307,11 @@ export class PullFeed {
     program: Program,
     payer?: web3.PublicKey
   ): web3.PublicKey {
-    return payer ?? program.provider.publicKey ?? web3.PublicKey.default;
+    if (payer) return payer;
+    if (program.provider.publicKey) return program.provider.publicKey;
+    throw new Error(
+      'No payer available. Either provide an explicit payer parameter or use a provider with a connected wallet.'
+    );
   }
 
   private getPayer(payer?: web3.PublicKey): web3.PublicKey {
@@ -609,6 +613,8 @@ export class PullFeed {
     crossbarClient?: CrossbarClient;
     retries?: number;
     variableOverrides?: Record<string, string>;
+    // Optional payer public key. If not provided, uses program.provider.publicKey.
+    payer?: web3.PublicKey;
   }): Promise<
     [
       web3.TransactionInstruction[] | undefined,
@@ -628,6 +634,7 @@ export class PullFeed {
       numSignatures: numSignatures,
       crossbarClient: params.crossbarClient,
       variableOverrides: params.variableOverrides,
+      payer: params.payer,
     });
   }
   /**
@@ -687,6 +694,7 @@ export class PullFeed {
     numSignatures: number;
     crossbarClient?: CrossbarClient;
     variableOverrides?: Record<string, string>;
+    payer?: web3.PublicKey;
   }): Promise<
     [
       web3.TransactionInstruction[] | undefined,
@@ -704,6 +712,7 @@ export class PullFeed {
         numSignatures: params.numSignatures,
         crossbarClient: params.crossbarClient,
         variableOverrides: params.variableOverrides,
+        payer: params.payer,
       }
     );
 
@@ -770,6 +779,7 @@ export class PullFeed {
       crossbarClient?: CrossbarClient;
       variableOverrides?: Record<string, string>;
       signatureInstructionIdx?: number; // position of the secp256k1 instruction in the transaction
+      payer?: web3.PublicKey;
     }
   ): Promise<
     [
@@ -876,7 +886,7 @@ export class PullFeed {
       queue: queue!,
       programState: State.keyFromSeed(program),
       recentSlothashes: SPL_SYSVAR_SLOT_HASHES_ID,
-      payer: PullFeed.getPayer(program),
+      payer: PullFeed.getPayer(program, params.payer),
       systemProgram: web3.SystemProgram.programId,
       rewardVault: spl.getAssociatedTokenAddressSync(
         SOL_NATIVE_MINT,

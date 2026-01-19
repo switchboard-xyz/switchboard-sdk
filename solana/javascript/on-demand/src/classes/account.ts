@@ -8,13 +8,17 @@ export abstract class SbAccount<AccountData> {
    *  Returns the payer public key to use for this account's actions.
    *
    *  If a payer is provided, it will be used. Otherwise, the program provider's public key will be
-   *  used. If no public key is set in the provider, the default public key will be returned.
+   *  used. If no public key is set in the provider, an error will be thrown.
    */
   private static getPayer(
     program: Program,
     payer?: web3.PublicKey
   ): web3.PublicKey {
-    return payer ?? program.provider.publicKey ?? web3.PublicKey.default;
+    if (payer) return payer;
+    if (program.provider.publicKey) return program.provider.publicKey;
+    throw new Error(
+      'No payer available. Either provide an explicit payer parameter or use a provider with a connected wallet.'
+    );
   }
 
   /**

@@ -49,15 +49,38 @@ where
 crate::cfg_client! {
     use crate::OnDemandError;
     use futures::TryFutureExt;
+
+    /// Fetches the Clock sysvar from the Solana cluster.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The RPC request fails (network issues, RPC provider errors)
+    /// - The account data cannot be deserialized as a Clock sysvar
     pub async fn fetch_async(
         client: &crate::RpcClient,
     ) -> std::result::Result<crate::solana_compat::solana_sdk::sysvar::clock::Clock, crate::OnDemandError> {
         let pubkey = crate::solana_compat::solana_sdk::sysvar::clock::id();
         let data = client
             .get_account_data(&pubkey)
-            .map_err(|_| OnDemandError::AccountNotFound)
+            .map_err(|e| {
+                // Log the full error for debugging while returning a simpler error type
+                // The Clock sysvar should always exist, so this is likely an RPC issue
+                eprintln!(
+                    "[switchboard] Failed to fetch Clock sysvar ({}): {}. This is likely an RPC provider issue, not a missing account.",
+                    pubkey,
+                    e
+                );
+                OnDemandError::NetworkError
+            })
             .await?
             .to_vec();
-        bincode::deserialize(&data).map_err(|_| OnDemandError::AccountNotFound)
+        bincode::deserialize(&data).map_err(|e| {
+            eprintln!(
+                "[switchboard] Failed to deserialize Clock sysvar data: {}. Data length: {} bytes",
+                e,
+                data.len()
+            );
+            OnDemandError::AccountDeserializeError
+        })
     }
 }

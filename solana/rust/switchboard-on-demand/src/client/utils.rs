@@ -331,7 +331,10 @@ pub async fn fetch_zerocopy_account<T: bytemuck::Pod + Discriminator + Owner>(
     let data = client
         .get_account_data(&pubkey.to_bytes().into())
         .await
-        .map_err(|_| OnDemandError::AccountNotFound)?;
+        .map_err(|e| {
+            eprintln!("[switchboard] Failed to fetch account (pubkey={}): {}", pubkey, e);
+            OnDemandError::NetworkError
+        })?;
 
     if data.len() < T::discriminator().len() {
         return Err(OnDemandError::InvalidDiscriminator);

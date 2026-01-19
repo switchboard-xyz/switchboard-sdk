@@ -45,7 +45,11 @@ export class Randomness {
     program: Program,
     payer?: web3.PublicKey
   ): web3.PublicKey {
-    return payer ?? program.provider.publicKey ?? web3.PublicKey.default;
+    if (payer) return payer;
+    if (program.provider.publicKey) return program.provider.publicKey;
+    throw new Error(
+      'No payer available. Either provide an explicit payer parameter or use a provider with a connected wallet.'
+    );
   }
 
   /**
