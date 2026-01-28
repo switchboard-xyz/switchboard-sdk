@@ -1179,13 +1179,14 @@ impl PythStream {
                 // USDG/USD - Global Dollar
                 ("daa58c6a3ce7d4b9c46c32a6e646012c17c4a2b24c08dd8c5e476118b855a7da", ("USDG", "USD")),
 
-                // Note: Pyth only provides USD pairs for these stablecoins (no USDT or USDC pairs)
+                // USDC/USD - Circle USD
+                ("eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a", ("USDC", "USD")),
             ];
             feeds.iter().map(|(id, (base, quote))| (id.to_string(), (base.to_string(), quote.to_string()))).collect()
         };
 
-        // Filter for only PYUSD, USDS, and USDG base assets
-        const ALLOWED_BASE_ASSETS: &[&str] = &["PYUSD", "USDS", "USDG"];
+        // Filter for allowed stablecoin base assets
+        const ALLOWED_BASE_ASSETS: &[&str] = &["PYUSD", "USDS", "USDG", "USDC"];
 
         let mut new_feeds = 0;
 

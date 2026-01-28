@@ -20,11 +20,16 @@ hex = "0.4.3"
 serde_json = "1.0.135"
 sha2 = "0.10.8"
 libsecp256k1 = "0.7.1"
-log = "0.4"
+log = "0.4.28"
 solana-sdk = ">=1.18"
 rand_chacha = "0.3.1"
 neon = "1.0.0"
 cached = { version = "0.47.0", features = ["async", "futures", "async-trait"] }
 
+# Optional: attestation-service brings in sev v6.3.1 which doesn't compile on ARM
+attestation-service = { git = "https://github.com/confidential-containers/trustee", features = ["snp-verifier"], rev = "ae7010d854341999afd0e353841ee0bf630ae4c1", optional = true }
+
 [features]
+default = []
 default-panic-hook = []
+verifier = ["attestation-service"]
