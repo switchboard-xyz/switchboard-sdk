@@ -16,7 +16,8 @@ pub struct QueuePayReward {}
 pub struct QueuePayRewardParams {}
 
 impl InstructionData for QueuePayRewardParams {}
-const DISCRIMINATOR: &'static [u8] = &[42, 168, 3, 251, 144, 57, 105, 201];
+// Discriminator for "global:queue_pay_rewards" (plural)
+const DISCRIMINATOR: &'static [u8] = &[67, 87, 149, 166, 56, 112, 20, 12];
 impl Discriminator for QueuePayReward {
     const DISCRIMINATOR: &'static [u8] = DISCRIMINATOR;
 }
@@ -29,8 +30,6 @@ impl Discriminator for QueuePayRewardParams {
 pub struct QueuePayRewardArgs {
     /// Queue account public key
     pub queue: Pubkey,
-    /// Oracle account public key
-    pub oracle: Pubkey,
     /// Payer account public key
     pub payer: Pubkey,
 }
@@ -39,13 +38,15 @@ pub struct QueuePayRewardArgs {
 pub struct QueuePayRewardAccounts {
     /// Queue account public key
     pub queue: Pubkey,
-    /// Oracle account public key
-    pub oracle: Pubkey,
-    /// SWITCH mint public key
-    pub switch_mint: Pubkey,
+    /// Jito Vault public key
+    pub vault: Pubkey,
+    /// Reward vault (wSOL ATA of queue)
+    pub reward_vault: Pubkey,
     /// Payer account public key
     pub payer: Pubkey,
-    /// Additional account metas required for the instruction
+    /// Escrow (payer's wSOL ATA)
+    pub escrow: Pubkey,
+    /// Additional account metas required for the instruction (oracle, authority, stats per oracle)
     pub remaining_accounts: Vec<AccountMeta>,
 }
 
@@ -56,19 +57,18 @@ impl ToAccountMetas for QueuePayRewardAccounts {
         let associated_token_program = SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID;
         let system_program = SYSTEM_PROGRAM_ID;
         let wsol_mint: Pubkey = crate::NATIVE_MINT.to_bytes().into();
-        let oracle_stats = OracleAccountData::stats_key(&self.oracle);
 
         let mut accounts = vec![
             AccountMeta::new(self.queue, false),
             AccountMeta::new_readonly(program_state, false),
             AccountMeta::new_readonly(system_program.to_bytes().into(), false),
-            AccountMeta::new_readonly(self.oracle, false),
-            AccountMeta::new(oracle_stats, false),
+            AccountMeta::new(self.vault, false),
+            AccountMeta::new(self.reward_vault, false),
             AccountMeta::new_readonly(token_program, false),
             AccountMeta::new_readonly(associated_token_program.to_bytes().into(), false),
             AccountMeta::new_readonly(wsol_mint, false),
-            AccountMeta::new_readonly(self.switch_mint, false),
             AccountMeta::new(self.payer, true),
+            AccountMeta::new(self.escrow, false),
         ];
         accounts.extend(self.remaining_accounts.clone());
         accounts
@@ -83,32 +83,53 @@ use crate::get_associated_token_address;
 
 impl QueuePayReward {
     pub async fn build_ix(client: &RpcClient, args: QueuePayRewardArgs) -> Result<Instruction, OnDemandError> {
-        let state = State::fetch_async(client).await?;
-        let switch_mint = state.switch_mint;
         let pid = if crate::utils::is_devnet() {
             get_sb_program_id("devnet")
         } else {
             get_sb_program_id("mainnet")
         };
 
-        let oracle_data = OracleAccountData::fetch_async(client, args.oracle).await?;
-        let operator = oracle_data.operator;
-        let mut remaining_accounts = vec![];
+        let queue_data = QueueAccountData::fetch_async(client, args.queue).await?;
+        let wsol_mint: Pubkey = crate::NATIVE_MINT.to_bytes().into();
 
-        if operator != Pubkey::default() {
-            let operator_reward_wallet = get_associated_token_address(&operator, &switch_mint);
-            remaining_accounts.push(AccountMeta::new_readonly(operator, false));
-            remaining_accounts.push(AccountMeta::new(operator_reward_wallet, false));
+        // Get the vault from queue data
+        let vault = queue_data.vaults.iter()
+            .find(|v| v.vault_key != Pubkey::default())
+            .map(|v| v.vault_key)
+            .ok_or(OnDemandError::AccountNotFound)?;
+
+        // Reward vault is queue's wSOL ATA
+        let reward_vault = get_associated_token_address(&args.queue, &wsol_mint);
+
+        // Escrow is payer's wSOL ATA
+        let escrow = get_associated_token_address(&args.payer, &wsol_mint);
+
+        // Build remaining accounts for all oracles on the queue
+        // Order: oracle, oracle_authority, oracle_stats (per oracle)
+        let mut remaining_accounts = vec![];
+        let oracle_keys = &queue_data.oracle_keys[..queue_data.oracle_keys_len as usize];
+
+        for oracle_key in oracle_keys {
+            if *oracle_key == Pubkey::default() {
+                continue;
+            }
+            let oracle_data = OracleAccountData::fetch_async(client, *oracle_key).await?;
+            let oracle_stats = OracleAccountData::stats_key(oracle_key);
+
+            remaining_accounts.push(AccountMeta::new_readonly(*oracle_key, false));
+            remaining_accounts.push(AccountMeta::new(oracle_data.authority, false));
+            remaining_accounts.push(AccountMeta::new(oracle_stats, false));
         }
 
         let ix = crate::utils::build_ix(
             &pid,
             &QueuePayRewardAccounts {
                 queue: args.queue,
-                oracle: args.oracle,
-                switch_mint: state.switch_mint,
-                remaining_accounts,
+                vault,
+                reward_vault,
                 payer: args.payer,
+                escrow,
+                remaining_accounts,
             },
             &QueuePayRewardParams { },
         );
@@ -118,12 +139,19 @@ impl QueuePayReward {
     pub async fn fetch_luts(client: &RpcClient, args: QueuePayRewardArgs) -> Result<Vec<AddressLookupTableAccount>, OnDemandError> {
         let queue_data = QueueAccountData::fetch_async(client, args.queue).await?;
         let queue_lut = queue_data.fetch_lut(&args.queue, client).await?;
-
-        let oracle_data = OracleAccountData::fetch_async(client, args.oracle).await?;
         let mut luts = vec![queue_lut];
 
-        if let Ok(oracle_lut) = oracle_data.fetch_lut(&args.oracle, client).await {
-            luts.push(oracle_lut);
+        // Fetch LUTs for all oracles on the queue
+        let oracle_keys = &queue_data.oracle_keys[..queue_data.oracle_keys_len as usize];
+        for oracle_key in oracle_keys {
+            if *oracle_key == Pubkey::default() {
+                continue;
+            }
+            if let Ok(oracle_data) = OracleAccountData::fetch_async(client, *oracle_key).await {
+                if let Ok(oracle_lut) = oracle_data.fetch_lut(oracle_key, client).await {
+                    luts.push(oracle_lut);
+                }
+            }
         }
 
         Ok(luts)
