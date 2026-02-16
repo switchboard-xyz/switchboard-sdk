@@ -1192,14 +1192,15 @@ export class Surge extends EventEmitter {
 
       this.log(`❌ Session request failed (${status}): ${message}`);
 
-      // Retry on server errors (5xx) and some client errors
-      if (status && status >= 500) return true; // Server errors
+      // Don't retry on authentication/subscription errors - surface to user
+      if (status === 401 || status === 403 || status === 400) return false;
+
+      // Retry on server errors and transient issues
+      if (status === 503) return true; // Service temporarily unavailable
+      if (status && status >= 500) return true; // Other server errors
       if (status === 429) return true; // Rate limit
       if (status === 408) return true; // Request timeout
       if (!status) return true; // Network errors
-
-      // Don't retry on authentication errors or bad requests
-      if (status === 401 || status === 403 || status === 400) return false;
     } else {
       this.log(`❌ Session request failed: ${error}`);
     }
