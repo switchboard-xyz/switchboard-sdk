@@ -100,7 +100,7 @@ This implementation allows you to read and utilize Switchboard data feeds within
 
 ## Creating an Aggregator and Sending Transactions
 
-Building a feed in Switchboard can be done using the Typescript SDK, or it can be done with the [Switchboard Web App](https://ondemand.switchboard.xyz/aptos/mainnet). Visit our [docs](https://docs.switchboard.xyz/docs) for more on designing and creating feeds.
+Building a feed in Switchboard can be done using the Typescript SDK, or it can be done with the [Switchboard Web App](https://ondemand.switchboard.xyz/aptos/mainnet). Visit our [docs](https://docs.switchboard.xyz/quick-start) for more on designing and creating feeds.
 
 ### Building Feeds in Typescript [optional]
 
