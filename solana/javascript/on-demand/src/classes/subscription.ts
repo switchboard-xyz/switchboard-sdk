@@ -1412,7 +1412,10 @@ export async function updateStateConfig(params: {
   const updateParams = {
     swtchMint: params.swtchMint || null,
     swtchFeedId: swtchFeedIdBytes,
-    epochLength: params.epochLength ? new BN(params.epochLength) : null,
+    epochLength:
+      params.epochLength !== null && params.epochLength !== undefined
+        ? new BN(params.epochLength)
+        : null,
   };
 
   const ix = await program.methods
@@ -1576,9 +1579,11 @@ export async function updateTier(params: {
     maxFeedsPerIx: params.maxFeedsPerIx ?? null,
     minDelayMs: params.minDelayMs ?? null,
     maxAuthorizedUsers: params.maxAuthorizedUsers ?? null,
-    costPerEpochUsdCents: params.costPerEpochUsdCents
-      ? new BN(params.costPerEpochUsdCents)
-      : null,
+    costPerEpochUsdCents:
+      params.costPerEpochUsdCents !== null &&
+      params.costPerEpochUsdCents !== undefined
+        ? new BN(params.costPerEpochUsdCents)
+        : null,
     isPublic: params.isPublic ?? null,
     enabled: params.enabled ?? null,
   };
@@ -1659,7 +1664,10 @@ export async function adminManageSubscription(params: {
   const adminParams = {
     setTierId: params.setTierId ?? null,
     setActive: params.setActive ?? null,
-    extendEpochs: params.extendEpochs ? new BN(params.extendEpochs) : null,
+    extendEpochs:
+      params.extendEpochs !== null && params.extendEpochs !== undefined
+        ? new BN(params.extendEpochs)
+        : null,
     updateContactName: params.updateContactName || null,
     updateContactEmail: params.updateContactEmail || null,
   };
