@@ -7,7 +7,7 @@ export const QUOTE_PROGRAM_ID = new web3.PublicKey(
   'orac1eFjzWL5R3RbbdMV68K9H6TaCVVcL6LjvQQWAbz'
 );
 export const FEED_AUTHORITY_UPDATE_OPCODE = 0x01;
-export const MAX_AUTHORITY_FEED_IDS = 14;
+export const MAX_AUTHORITY_FEED_IDS = 13;
 export const MAX_AUTHORITY_FEED_ID_BYTES = MAX_AUTHORITY_FEED_IDS * 32;
 
 const AUTHORITY_QUOTE_SCHEME_TAG = Buffer.from('AUTH');
@@ -116,6 +116,18 @@ function validateAuthorityFeedCount(feedCount: number): void {
     throw new Error(
       `Authority quote payload supports at most ${MAX_AUTHORITY_FEED_IDS} feed IDs (${MAX_AUTHORITY_FEED_ID_BYTES} bytes)`
     );
+  }
+}
+
+function validateUniqueFeedHashes(feedHashes: Buffer[]): void {
+  for (let i = 0; i < feedHashes.length; i++) {
+    for (let j = i + 1; j < feedHashes.length; j++) {
+      if (feedHashes[i].equals(feedHashes[j])) {
+        throw new Error(
+          'Authority quote payload does not allow duplicate feed IDs'
+        );
+      }
+    }
   }
 }
 
@@ -254,6 +266,7 @@ function parseAuthorityQuotePayload(
     });
     offset += FEED_INFO_SIZE;
   }
+  validateUniqueFeedHashes(feeds.map(feed => feed.feedHash));
 
   const slot = Number(buffer.readBigUInt64LE(offset));
   const version = buffer[offset + SLOT_SIZE];
@@ -299,6 +312,7 @@ export class OracleQuote {
   ): [web3.PublicKey, number] {
     const normalizedFeedHashes = normalizeFeedHashes(feedHashes);
     validateAuthorityFeedCount(normalizedFeedHashes.length);
+    validateUniqueFeedHashes(normalizedFeedHashes);
 
     return web3.PublicKey.findProgramAddressSync(
       [
@@ -319,6 +333,9 @@ export class OracleQuote {
       throw new Error('Authority quote payload requires at least one feed');
     }
     validateAuthorityFeedCount(feeds.length);
+    validateUniqueFeedHashes(
+      feeds.map(feed => normalizeFeedHash(feed.feedHash))
+    );
 
     const parts: Buffer[] = [
       AUTHORITY_QUOTE_SCHEME_TAG,

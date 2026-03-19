@@ -76,6 +76,17 @@ function run(): void {
     })
   );
   assert.throws(() => OracleQuote.buildAuthorityQuotePayload(tooManyFeeds, 1));
+
+  const duplicateFeed = Buffer.from(new Uint8Array(32).fill(9));
+  assert.throws(() =>
+    OracleQuote.buildAuthorityQuotePayload(
+      [
+        { feedHash: duplicateFeed, value: 1n },
+        { feedHash: duplicateFeed, value: 2n },
+      ],
+      1
+    )
+  );
 }
 
 run();

@@ -9,7 +9,7 @@ use crate::{
 pub const AUTHORITY_QUOTE_SCHEME_TAG: [u8; 4] = *b"AUTH";
 pub const QUOTE_TAIL_DISCRIMINATOR: [u8; 4] = *b"SBOD";
 pub const FEED_AUTHORITY_UPDATE_OPCODE: u8 = 0x01;
-pub const MAX_AUTHORITY_FEED_IDS: usize = 14;
+pub const MAX_AUTHORITY_FEED_IDS: usize = 13;
 pub const MAX_AUTHORITY_FEED_ID_BYTES: usize = MAX_AUTHORITY_FEED_IDS * 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +65,7 @@ impl AuthorityQuotePayload {
         for chunk in data[feeds_start..feeds_end].chunks_exact(PackedFeedInfo::PACKED_SIZE) {
             feeds.push(PackedFeedInfo::try_from_slice(chunk)?);
         }
+        validate_unique_feed_ids_from_feeds(&feeds)?;
 
         let slot_start = feeds_end;
         let slot = u64::from_le_bytes(data[slot_start..slot_start + 8].try_into().unwrap());
@@ -87,6 +88,7 @@ impl AuthorityQuotePayload {
             bail!("Authority quote payload requires at least one feed");
         }
         validate_authority_feed_count(feeds.len())?;
+        validate_unique_feed_ids_from_feeds(feeds)?;
 
         let mut data =
             Vec::with_capacity(4 + 1 + (feeds.len() * PackedFeedInfo::PACKED_SIZE) + 8 + 1 + 4);
@@ -123,12 +125,35 @@ fn validate_authority_feed_count(feed_count: usize) -> Result<()> {
     Ok(())
 }
 
+fn validate_unique_feed_ids(feed_ids: &[[u8; 32]]) -> Result<()> {
+    for (i, feed_id) in feed_ids.iter().enumerate() {
+        for other_feed_id in feed_ids.iter().skip(i + 1) {
+            if feed_id == other_feed_id {
+                bail!("Authority quote payload does not allow duplicate feed IDs");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_unique_feed_ids_from_feeds(feeds: &[PackedFeedInfo]) -> Result<()> {
+    for (i, feed) in feeds.iter().enumerate() {
+        for other_feed in feeds.iter().skip(i + 1) {
+            if feed.feed_id() == other_feed.feed_id() {
+                bail!("Authority quote payload does not allow duplicate feed IDs");
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn derive_authority_quote_pubkey(
     authority: &Pubkey,
     feed_ids: &[[u8; 32]],
     program_id: &Pubkey,
 ) -> Result<(Pubkey, u8)> {
     validate_authority_feed_count(feed_ids.len())?;
+    validate_unique_feed_ids(feed_ids)?;
     let mut seeds = Vec::with_capacity(feed_ids.len() + 2);
     seeds.push(AUTHORITY_QUOTE_SCHEME_TAG.as_ref());
     seeds.push(authority.as_ref());
@@ -241,7 +266,50 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("Authority quote payload supports at most 14 feed IDs")
+                .contains("Authority quote payload supports at most 13 feed IDs")
+        );
+    }
+
+    #[test]
+    fn authority_quote_payload_rejects_duplicate_feed_ids() {
+        let duplicate_feed_id = [7u8; 32];
+        let feeds = vec![
+            PackedFeedInfo {
+                feed_id: duplicate_feed_id,
+                feed_value: 1,
+                min_oracle_samples: 1,
+            },
+            PackedFeedInfo {
+                feed_id: duplicate_feed_id,
+                feed_value: 2,
+                min_oracle_samples: 1,
+            },
+        ];
+
+        let err = build_authority_quote_payload(&feeds, 1, 1).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("Authority quote payload does not allow duplicate feed IDs")
+        );
+    }
+
+    #[test]
+    fn authority_quote_derivation_rejects_duplicate_feed_ids() {
+        let authority = Pubkey::new_unique();
+        let program_id = Pubkey::new_unique();
+        let duplicate_feed_id = [4u8; 32];
+
+        let err = derive_authority_quote_pubkey(
+            &authority,
+            &[duplicate_feed_id, duplicate_feed_id],
+            &program_id,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("Authority quote payload does not allow duplicate feed IDs")
         );
     }
 }
