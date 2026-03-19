@@ -1,6 +1,9 @@
-use crate::sysvar::ed25519_sysvar::Ed25519SignatureOffsets;
-use crate::smallvec::{SmallVec, U8Prefix, U16Prefix};
 use crate::on_demand::oracle_quote::feed_info::{PackedFeedInfo, PackedQuoteHeader};
+#[cfg(feature = "anchor")]
+use crate::on_demand::oracle_quote::instruction_parser::ParsedQuotePayload;
+use crate::on_demand::oracle_quote::authority_quote::QuoteSourceScheme;
+use crate::smallvec::{SmallVec, U16Prefix, U8Prefix};
+use crate::sysvar::ed25519_sysvar::Ed25519SignatureOffsets;
 use crate::Pubkey;
 
 pub const QUOTE_DISCRIMINATOR: &[u8; 8] = b"SBOracle";
@@ -63,7 +66,7 @@ impl anchor_lang::IdlBuild for OracleSignature {}
 ///
 /// # On-chain Layout (excluding 8-byte discriminator):
 /// ```text
-/// [0..32]      queue: Queue pubkey (32 bytes)
+/// [0..32]      namespace: Queue pubkey for oracle quotes, authority pubkey for authority quotes (32 bytes)
 /// [34..]       signatures: SmallVec of OracleSignature (2-byte u16 length + 110 bytes each)
 ///              - Ed25519SignatureOffsets (14 bytes)
 ///              - pubkey (32 bytes)
@@ -82,7 +85,10 @@ impl anchor_lang::IdlBuild for OracleSignature {}
 /// - `oracle_idxs`: 1-byte (u8) length prefix - max 255 indices
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchboardQuote {
-    /// Queue pubkey that this oracle quote belongs to
+    /// Namespace pubkey stored with this quote.
+    ///
+    /// Oracle quotes store the queue pubkey here. Authority quotes store the
+    /// authority pubkey that owns the quote stream here.
     pub queue: Pubkey,
     /// Uses 2-byte (u16) length prefix
     pub signatures: SmallVec<OracleSignature, U16Prefix>,
@@ -195,7 +201,6 @@ impl anchor_lang::AccountSerialize for SwitchboardQuote {
 impl anchor_lang::AccountDeserialize for SwitchboardQuote {
     fn try_deserialize(buf: &mut &[u8]) -> anchor_lang::Result<Self> {
         use anchor_lang::Discriminator;
-        use crate::on_demand::oracle_quote::instruction_parser::ParsedEd25519Instruction;
 
         // Check minimum size: discriminator (8) + queue (32) = 40 bytes minimum
         if buf.len() < 40 {
@@ -208,8 +213,8 @@ impl anchor_lang::AccountDeserialize for SwitchboardQuote {
             return Err(anchor_lang::error::ErrorCode::AccountDiscriminatorMismatch.into());
         }
 
-        // Extract queue pubkey (bytes 8-40)
-        let queue = Pubkey::new_from_array(buf[8..40].try_into().unwrap());
+        // Extract namespace pubkey (bytes 8-40)
+        let namespace = Pubkey::new_from_array(buf[8..40].try_into().unwrap());
 
         // Parse length-delimited ED25519 instruction data starting at byte 40
         let data = &buf[40..];
@@ -225,45 +230,11 @@ impl anchor_lang::AccountDeserialize for SwitchboardQuote {
 
         // Parse the ED25519 instruction data
         let ed25519_data = &data[2..len + 2];
-        let parsed = ParsedEd25519Instruction::parse(ed25519_data)
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        // Convert Vec to SmallVec (will fail if exceeds capacity)
-        let signatures = parsed.signatures.into_iter()
-            .map(|sig| OracleSignature {
-                offsets: sig.offsets,
-                pubkey: Pubkey::new_from_array(sig.pubkey),
-                signature: sig.signature,
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        let feeds = parsed.feeds.into_iter()
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        let oracle_idxs = parsed.oracle_idxs.into_iter()
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        Ok(Self {
-            queue,
-            signatures,
-            quote_header: parsed.quote_header,
-            feeds,
-            oracle_idxs,
-            slot: parsed.slot,
-            version: parsed.version,
-            tail_discriminator: parsed.discriminator,
-        })
+        parse_switchboard_quote(namespace, ed25519_data)
+            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize.into())
     }
 
     fn try_deserialize_unchecked(buf: &mut &[u8]) -> anchor_lang::Result<Self> {
-        use crate::on_demand::oracle_quote::instruction_parser::ParsedEd25519Instruction;
-
         if buf.len() < 40 {
             return Err(anchor_lang::error::ErrorCode::AccountDidNotDeserialize.into());
         }
@@ -271,8 +242,8 @@ impl anchor_lang::AccountDeserialize for SwitchboardQuote {
         let full_buf = *buf;
         *buf = &[]; // Consume the buffer
 
-        // Extract queue pubkey (bytes 8-40) - skip discriminator check for unchecked
-        let queue = Pubkey::new_from_array(full_buf[8..40].try_into().unwrap());
+        // Extract namespace pubkey (bytes 8-40) - skip discriminator check for unchecked
+        let namespace = Pubkey::new_from_array(full_buf[8..40].try_into().unwrap());
 
         // Parse length-delimited ED25519 instruction data starting at byte 40
         let data = &full_buf[40..];
@@ -288,40 +259,8 @@ impl anchor_lang::AccountDeserialize for SwitchboardQuote {
 
         // Parse the ED25519 instruction data
         let ed25519_data = &data[2..len + 2];
-        let parsed = ParsedEd25519Instruction::parse(ed25519_data)
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        // Convert Vec to SmallVec (will fail if exceeds capacity)
-        let signatures = parsed.signatures.into_iter()
-            .map(|sig| OracleSignature {
-                offsets: sig.offsets,
-                pubkey: Pubkey::new_from_array(sig.pubkey),
-                signature: sig.signature,
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        let feeds = parsed.feeds.into_iter()
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        let oracle_idxs = parsed.oracle_idxs.into_iter()
-            .collect::<Vec<_>>()
-            .try_into()
-            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize)?;
-
-        Ok(Self {
-            queue,
-            signatures,
-            quote_header: parsed.quote_header,
-            feeds,
-            oracle_idxs,
-            slot: parsed.slot,
-            version: parsed.version,
-            tail_discriminator: parsed.discriminator,
-        })
+        parse_switchboard_quote(namespace, ed25519_data)
+            .map_err(|_| anchor_lang::error::ErrorCode::AccountDidNotDeserialize.into())
     }
 }
 
@@ -347,6 +286,16 @@ impl SwitchboardQuote {
     /// ```
     pub fn feeds_slice(&self) -> &[PackedFeedInfo] {
         self.feeds.as_slice()
+    }
+
+    pub fn source_scheme(&self) -> QuoteSourceScheme {
+        let signed_slothash = self.quote_header.signed_slothash;
+        if self.signatures.is_empty() && self.oracle_idxs.is_empty() && signed_slothash == [0u8; 32]
+        {
+            QuoteSourceScheme::Authority
+        } else {
+            QuoteSourceScheme::Oracle
+        }
     }
 
     /// Get the canonical oracle account public key for the given feed IDs
@@ -413,5 +362,74 @@ impl SwitchboardQuote {
 impl anchor_lang::Owner for SwitchboardQuote {
     fn owner() -> anchor_lang::solana_program::pubkey::Pubkey {
         crate::QUOTE_PROGRAM_ID
+    }
+}
+
+#[cfg(feature = "anchor")]
+fn parse_switchboard_quote(
+    namespace: Pubkey,
+    quote_data: &[u8],
+) -> anyhow::Result<SwitchboardQuote> {
+    match ParsedQuotePayload::parse(quote_data)? {
+        ParsedQuotePayload::Oracle(parsed) => {
+            let signatures = parsed
+                .signatures
+                .into_iter()
+                .map(|sig| OracleSignature {
+                    offsets: sig.offsets,
+                    pubkey: Pubkey::new_from_array(sig.pubkey),
+                    signature: sig.signature,
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Too many quote signatures"))?;
+            let feeds = parsed
+                .feeds
+                .into_iter()
+                .collect::<Vec<_>>()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Too many quote feeds"))?;
+            let oracle_idxs = parsed
+                .oracle_idxs
+                .into_iter()
+                .collect::<Vec<_>>()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Too many oracle indexes"))?;
+
+            Ok(SwitchboardQuote {
+                queue: namespace,
+                signatures,
+                quote_header: parsed.quote_header,
+                feeds,
+                oracle_idxs,
+                slot: parsed.slot,
+                version: parsed.version,
+                tail_discriminator: parsed.discriminator,
+            })
+        }
+        ParsedQuotePayload::Authority(parsed) => {
+            let quote_header = parsed.quote_header();
+            let feeds = parsed
+                .feeds
+                .into_iter()
+                .collect::<Vec<_>>()
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Too many authority quote feeds"))?;
+
+            Ok(SwitchboardQuote {
+                queue: namespace,
+                signatures: Vec::<OracleSignature>::new()
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Failed to build empty signature set"))?,
+                quote_header,
+                feeds,
+                oracle_idxs: Vec::<u8>::new()
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("Failed to build empty oracle index set"))?,
+                slot: parsed.slot,
+                version: parsed.version,
+                tail_discriminator: parsed.tail_discriminator,
+            })
+        }
     }
 }

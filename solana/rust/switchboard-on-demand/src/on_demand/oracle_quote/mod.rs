@@ -46,6 +46,8 @@
 
 pub mod feed_info;
 pub use feed_info::*;
+pub mod authority_quote;
+pub use authority_quote::*;
 pub mod quote;
 pub use quote::*;
 pub mod quote_verifier;

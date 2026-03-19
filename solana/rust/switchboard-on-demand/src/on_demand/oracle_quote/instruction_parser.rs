@@ -7,9 +7,12 @@ use anyhow::{bail, Result};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::on_demand::oracle_quote::feed_info::{PackedFeedInfo, PackedQuoteHeader};
+use crate::on_demand::oracle_quote::authority_quote::{
+    AuthorityQuotePayload, QuoteSourceScheme, AUTHORITY_QUOTE_SCHEME_TAG,
+};
 use crate::sysvar::ed25519_sysvar::{
-    Ed25519SignatureOffsets, ED25519_PUBKEY_SERIALIZED_SIZE, ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE,
-    ED25519_SIGNATURE_SERIALIZED_SIZE,
+    Ed25519SignatureOffsets, ED25519_PUBKEY_SERIALIZED_SIZE,
+    ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE, ED25519_SIGNATURE_SERIALIZED_SIZE,
 };
 
 /// Parsed ED25519 instruction data with owned values (not references)
@@ -50,6 +53,12 @@ pub struct OracleSignatureData {
     pub pubkey: [u8; 32],
     /// ED25519 signature (64 bytes)
     pub signature: [u8; 64],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParsedQuotePayload {
+    Oracle(ParsedEd25519Instruction),
+    Authority(AuthorityQuotePayload),
 }
 
 impl ParsedEd25519Instruction {
@@ -109,7 +118,8 @@ impl ParsedEd25519Instruction {
         let slot_bytes = &suffix[num_signatures as usize..num_signatures as usize + 8];
         let slot = u64::from_le_bytes(slot_bytes.try_into().unwrap());
         let version = suffix[num_signatures as usize + 8];
-        let discriminator: [u8; 4] = suffix[num_signatures as usize + 9..num_signatures as usize + 13]
+        let discriminator: [u8; 4] = suffix
+            [num_signatures as usize + 9..num_signatures as usize + 13]
             .try_into()
             .unwrap();
 
@@ -123,20 +133,25 @@ impl ParsedEd25519Instruction {
             bail!("Data too short for first signature offsets");
         }
 
-        let first_offsets = Self::read_offsets(&message_data[offset..offset + ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE]);
+        let first_offsets = Self::read_offsets(
+            &message_data[offset..offset + ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE],
+        );
         let message_offset = first_offsets.message_data_offset as usize;
         let message_size = first_offsets.message_data_size as usize;
 
         // Extract all signatures
         for i in 0..num_signatures {
-            let offsets = Self::read_offsets(&message_data[offset..offset + ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE]);
+            let offsets = Self::read_offsets(
+                &message_data[offset..offset + ED25519_SIGNATURE_OFFSETS_SERIALIZED_SIZE],
+            );
 
             // Read pubkey
             let pubkey_offset = offsets.public_key_offset as usize;
             if pubkey_offset + ED25519_PUBKEY_SERIALIZED_SIZE > message_data.len() {
                 bail!("Pubkey offset out of bounds");
             }
-            let pubkey: [u8; 32] = message_data[pubkey_offset..pubkey_offset + ED25519_PUBKEY_SERIALIZED_SIZE]
+            let pubkey: [u8; 32] = message_data
+                [pubkey_offset..pubkey_offset + ED25519_PUBKEY_SERIALIZED_SIZE]
                 .try_into()
                 .unwrap();
 
@@ -145,7 +160,8 @@ impl ParsedEd25519Instruction {
             if sig_offset + ED25519_SIGNATURE_SERIALIZED_SIZE > message_data.len() {
                 bail!("Signature offset out of bounds");
             }
-            let signature: [u8; 64] = message_data[sig_offset..sig_offset + ED25519_SIGNATURE_SERIALIZED_SIZE]
+            let signature: [u8; 64] = message_data
+                [sig_offset..sig_offset + ED25519_SIGNATURE_SERIALIZED_SIZE]
                 .try_into()
                 .unwrap();
 
@@ -233,9 +249,29 @@ impl ParsedEd25519Instruction {
     }
 }
 
+impl ParsedQuotePayload {
+    pub fn parse(data: &[u8]) -> Result<Self> {
+        if data.starts_with(&AUTHORITY_QUOTE_SCHEME_TAG) {
+            Ok(Self::Authority(AuthorityQuotePayload::parse(data)?))
+        } else {
+            Ok(Self::Oracle(ParsedEd25519Instruction::parse(data)?))
+        }
+    }
+
+    pub fn source_scheme(&self) -> QuoteSourceScheme {
+        match self {
+            Self::Oracle(_) => QuoteSourceScheme::Oracle,
+            Self::Authority(_) => QuoteSourceScheme::Authority,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::on_demand::oracle_quote::authority_quote::{
+        build_authority_quote_payload, QuoteSourceScheme, QUOTE_TAIL_DISCRIMINATOR,
+    };
 
     #[test]
     fn test_parse_owned_structure() {
@@ -272,5 +308,42 @@ mod tests {
             borsh::from_slice(&serialized).expect("Failed to deserialize");
 
         assert_eq!(parsed, deserialized);
+    }
+
+    #[test]
+    fn test_parse_authority_quote_payload() {
+        let feeds = vec![PackedFeedInfo {
+            feed_id: [7u8; 32],
+            feed_value: 99,
+            min_oracle_samples: 1,
+        }];
+        let payload = build_authority_quote_payload(&feeds, 55, 3).unwrap();
+        let parsed = ParsedQuotePayload::parse(&payload).unwrap();
+
+        match parsed {
+            ParsedQuotePayload::Authority(authority) => {
+                assert_eq!(authority.feeds, feeds);
+                assert_eq!(authority.slot, 55);
+                assert_eq!(authority.version, 3);
+                assert_eq!(authority.tail_discriminator, QUOTE_TAIL_DISCRIMINATOR);
+            }
+            ParsedQuotePayload::Oracle(_) => panic!("expected authority payload"),
+        }
+    }
+
+    #[test]
+    fn test_source_scheme_detection() {
+        let payload = build_authority_quote_payload(
+            &[PackedFeedInfo {
+                feed_id: [8u8; 32],
+                feed_value: 11,
+                min_oracle_samples: 1,
+            }],
+            77,
+            1,
+        )
+        .unwrap();
+        let parsed = ParsedQuotePayload::parse(&payload).unwrap();
+        assert_eq!(parsed.source_scheme(), QuoteSourceScheme::Authority);
     }
 }
