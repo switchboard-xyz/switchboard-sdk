@@ -1,5 +1,6 @@
 export * as BigUtils from './big.js';
 export * from './crossbar-client.js';
+export { SWITCHBOARD_ABI } from './evm/abi.js';
 export * from './evm-utils.js';
 export * from './feed-hash.js';
 export * from './gateway.js';
