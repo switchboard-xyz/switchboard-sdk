@@ -16,6 +16,23 @@ use tokio::time::interval;
 use tokio::time::Duration;
 use tokio_stream::wrappers::IntervalStream;
 
+fn de_decimal_opt<'de, D>(deserializer: D) -> Result<Option<Decimal>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(s) => s.parse::<Decimal>().map(Some).map_err(DeError::custom),
+        serde_json::Value::Number(n) => n
+            .to_string()
+            .parse::<Decimal>()
+            .map(Some)
+            .map_err(DeError::custom),
+        _ => Err(DeError::custom("invalid decimal type")),
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct StoreResponse {
     pub cid: String,
@@ -34,6 +51,7 @@ pub struct FetchSolanaUpdatesResponse {
 #[derive(Serialize, Deserialize)]
 pub struct Response {
     pub oracle: String,
+    #[serde(default, deserialize_with = "de_decimal_opt")]
     pub result: Option<Decimal>,
     pub errors: String,
 }
@@ -43,7 +61,7 @@ pub struct SimulateSolanaFeedsResponse {
     pub feed: String,
     pub feedHash: String,
     pub results: Vec<Option<Decimal>>,
-    #[serde(skip_deserializing, default)]
+    #[serde(default, deserialize_with = "de_decimal_opt")]
     pub result: Option<Decimal>,
 }
 
@@ -54,11 +72,13 @@ pub struct SimulateSuiFeedsResponse {
     // The TS endpoint returns the results as strings. You can choose to parse them into Decimal if desired.
     pub results: Vec<String>,
     // The result is already computed by the server; hence, no median calculation here.
-    #[serde(skip_deserializing, default)]
+    #[serde(default, deserialize_with = "de_decimal_opt")]
     pub result: Option<Decimal>,
     #[serde(default)]
+    #[serde(deserialize_with = "de_decimal_opt")]
     pub stdev: Option<Decimal>,
     #[serde(default)]
+    #[serde(deserialize_with = "de_decimal_opt")]
     pub variance: Option<Decimal>,
 }
 
@@ -136,6 +156,18 @@ fn cluster_type_to_string(cluster_type: ClusterType) -> String {
         ClusterType::Development => "development",
     }
     .to_string()
+}
+
+fn compute_simulate_solana_result_if_missing(response: &mut SimulateSolanaFeedsResponse) {
+    if response.result.is_some() {
+        return;
+    }
+
+    // Collect non-None decimals and compute median.
+    let valid: Vec<Decimal> = response.results.iter().copied().flatten().collect();
+    if !valid.is_empty() {
+        response.result = Some(median(valid.as_slice()).expect("Failed to compute median"));
+    }
 }
 
 impl Default for CrossbarClient {
@@ -284,15 +316,9 @@ impl CrossbarClient {
         }
 
         let mut responses: Vec<SimulateSolanaFeedsResponse> = serde_json::from_str(&raw)?;
-        // Compute the median result for each response
         for response in responses.iter_mut() {
-            // Collect non-None decimals
-            let valid: Vec<Decimal> = response.results.iter().filter_map(|x| *x).collect();
-            response.result = if valid.is_empty() {
-                None
-            } else {
-                Some(median(valid.as_slice()).expect("Failed to compute median"))
-            };
+            // Prefer server-provided `result`; fall back to median(results) if absent.
+            compute_simulate_solana_result_if_missing(response);
         }
         Ok(responses)
     }
@@ -543,16 +569,42 @@ impl CrossbarClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
 
-    #[tokio::test]
-    async fn test_crossbar_client_default_initialization() {
-        let key = Pubkey::from_str("D1MmZ3je8GCjLrTbWXotnZ797k6E56QkdyXyhPXZQocH").unwrap();
-        let client = CrossbarClient::default();
-        let resp = client
-            .simulate_solana_feeds(ClusterType::MainnetBeta, &[key])
-            .await
-            .unwrap();
-        println!("{:?}", resp);
+    #[test]
+    fn simulate_solana_deserializes_result_string_even_if_results_empty() {
+        let raw = r#"[{
+            "feed":"D1MmZ3je8GCjLrTbWXotnZ797k6E56QkdyXyhPXZQocH",
+            "feedHash":"deadbeef",
+            "results":[],
+            "result":"115.86634458"
+        }]"#;
+
+        let mut responses: Vec<SimulateSolanaFeedsResponse> = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            responses[0].result,
+            Some("115.86634458".parse::<Decimal>().unwrap())
+        );
+
+        // Ensure our fallback computation doesn't overwrite a valid server result.
+        compute_simulate_solana_result_if_missing(&mut responses[0]);
+        assert_eq!(
+            responses[0].result,
+            Some("115.86634458".parse::<Decimal>().unwrap())
+        );
+    }
+
+    #[test]
+    fn simulate_solana_computes_median_from_results_when_result_missing() {
+        let raw = r#"[{
+            "feed":"D1MmZ3je8GCjLrTbWXotnZ797k6E56QkdyXyhPXZQocH",
+            "feedHash":"deadbeef",
+            "results":[1,3,2]
+        }]"#;
+
+        let mut responses: Vec<SimulateSolanaFeedsResponse> = serde_json::from_str(raw).unwrap();
+        assert_eq!(responses[0].result, None);
+
+        compute_simulate_solana_result_if_missing(&mut responses[0]);
+        assert_eq!(responses[0].result, Some("2".parse::<Decimal>().unwrap()));
     }
 }
