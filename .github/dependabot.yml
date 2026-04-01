@@ -1,0 +1,183 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/aptos/aptos_v2/scripts"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/aptos/examples/example_basic_read"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/aptos/on_demand"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/javascript/common"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/sail/sail-sdk"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/solana/javascript/on-demand"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/solana/rust/switchboard-on-demand"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      javascript:
+        patterns:
+          - "*"
+
+  - package-ecosystem: cargo
+    directory: "/sail/sail-sdk"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: cargo
+    directory: "/sail/sail-sdk/native"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: cargo
+    directory: "/solana/rust/switchboard-on-demand"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: cargo
+    directory: "/solana/rust/switchboard-on-demand-client"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: cargo
+    directory: "/surge/switchboard-surge-core"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: cargo
+    directory: "/surge/switchboard-surge-oracle"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - "*"
