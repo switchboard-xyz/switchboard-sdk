@@ -17,6 +17,7 @@ import type {
   V2UpdateQuery,
   V2UpdateResponse,
 } from './types/crossbar.js';
+import type { CrossbarInstructionWire } from './utils/instructions.js';
 import { IxFromHex } from './utils/instructions.js';
 import { Gateway } from './gateway.js';
 import type { IOracleFeed } from './protos.js';
@@ -192,8 +193,9 @@ export class CrossbarClient {
    * Fetch updates for Solana network feeds from the crossbar
    * @param {string} network - The Solana network to fetch updates for
    * @param {string[]} feedpubkeys - The public keys of the feeds to fetch updates for
+   * @param {string} payer - The payer public key used to build the pull instructions
    * @param {number} [numSignatures] - The number of signatures to fetch (optional)
-   * @returns {Promise<{ success: boolean; pullIx: TransactionInstruction; responses: { oracle: string; result: number | null; errors: string }[]; lookupTables: string[] }[]>} - The updates for the specified feeds
+   * @returns {Promise<{ success: boolean; pullIxns: TransactionInstruction[]; responses: { oracle: string; result: number | null; errors: string }[]; lookupTables: string[] }[]>} - The decoded updates for the specified feeds
    */
   async fetchSolanaUpdates(
     network: string,
@@ -218,11 +220,22 @@ export class CrossbarClient {
         .get(`${this.crossbarUrl}/updates/solana/${network}/${feedsParam}`, {
           params: { numSignatures, payer },
         })
-        .then(resp => resp.data);
+        .then(
+          resp =>
+            resp.data as {
+              success: boolean;
+              pullIxns: CrossbarInstructionWire[];
+              responses: {
+                oracle: string;
+                result: number | null;
+                errors: string;
+              }[];
+              lookupTables: string[];
+            }[]
+        );
 
-      // Convert pullIx from hex to TransactionInstruction using IxFromHex
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const updates = response.map((update: any) => ({
+      // Decode the wire-format instructions into TransactionInstruction objects.
+      const updates = response.map(update => ({
         ...update,
         pullIxns: update.pullIxns.map(IxFromHex),
       }));

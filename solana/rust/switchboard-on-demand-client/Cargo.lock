@@ -4809,6 +4809,7 @@ dependencies = [
  "arrayref",
  "base58",
  "base64 0.22.1",
+ "bincode",
  "borsh 0.9.3",
  "bs58",
  "bytemuck",
