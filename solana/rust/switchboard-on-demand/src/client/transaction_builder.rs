@@ -688,7 +688,6 @@ impl TryFrom<TransactionBuilder> for VersionedTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::solana_program::instruction::AccountMeta;
     use crate::solana_compat::solana_sdk::signer::keypair::Keypair;
     use tokio::sync::{OnceCell, RwLock};
 
@@ -750,7 +749,7 @@ mod tests {
     fn test_add_compute_budget_ixs() {
         let payer = Arc::new(Keypair::new());
         let payer_pubkey = payer.pubkey();
-        let payer_pubkey_converted = ::solana_program::pubkey::Pubkey::new_from_array(payer_pubkey.to_bytes());
+        let payer_pubkey_converted = Pubkey::new_from_array(payer_pubkey.to_bytes());
 
         let tx = TransactionBuilder::new_with_payer(payer.clone())
             .add_ix(Instruction::new_with_bytes(
@@ -836,9 +835,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_transaction_builder_with_arcswap_payer() {
-        let payer = arc_swap::ArcSwap::new(Arc::new(Keypair::new()));
-        let payer_arc = payer.load();
+    async fn test_transaction_builder_with_nested_arc_payer() {
+        let payer_arc = Arc::new(Arc::new(Keypair::new()));
 
         let tx = TransactionBuilder::new_with_payer(payer_arc.clone())
             .add_ix(Instruction::new_with_bytes(

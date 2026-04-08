@@ -1,58 +1,57 @@
-import type { IOracleJob } from '../src/index.js';
-import { CrossbarClient } from '../src/index.js';
+import type { IOracleFeed, IOracleJob } from '../src/index.js';
+import {
+  CrossbarClient,
+  serializeOracleJob,
+} from '../src/index.js';
+import { deserializeOracleFeed } from '../src/utils/oracle-feed.js';
 
 import { PublicKey } from '@solana/web3.js';
 import { expect } from 'chai';
 
-const queue = 'FfD96yeXs4cxZshoPPSKhSPgVQxLAJUT3gefgh84m1Di';
 const job: IOracleJob = {
   tasks: [{ valueTask: { value: 123 } }],
+};
+const oracleFeed: IOracleFeed = {
+  jobs: [job],
 };
 
 describe('CrossbarClient Tests', () => {
   const client = CrossbarClient.default(/* verbose= */ true);
+  let storedFeedId: string;
+  let storedCid: string;
 
-  afterAll(async () => {});
+  beforeAll(async () => {
+    const { cid, feedId } = await client.storeOracleFeed(oracleFeed);
+    storedCid = cid;
+    storedFeedId = feedId;
+  }, 10_000);
 
-  test('Storing a job.', async () => {
-    const { cid, feedHash, queueHex } = await client.store(queue, [job]);
-    expect(cid).to.eq(
-      'bafkreifvrlnt2xdl5eubo5i5e6obpr7t3gyhdelb4n4pk6lvtxjdak6yve'
-    );
-    expect(feedHash).to.eq(
-      '0xb58adb3d5c6be92817751d279c17c7f3d9b0719161e378f579759dd2302bd8a9'
-    );
-    expect(queueHex).to.eq(
-      '0xd9cd6a04191d6cd559a5276e69a79cc6f95555deeae498c3a2f8b3ee670287d1'
-    );
+  test('Storing an oracle feed.', async () => {
+    expect(storedCid).to.be.a('string').and.not.empty;
+    expect(storedFeedId).to.match(/^0x[0-9a-f]+$/i);
   });
 
   test('Fetching from a feed hash (with `0x` prefix).', async () => {
-    const { feedHash, queueHex, jobs } = await client.fetch(
-      '0xb58adb3d5c6be92817751d279c17c7f3d9b0719161e378f579759dd2302bd8a9'
+    const response = await client.fetchOracleFeed(storedFeedId);
+    const decodedFeed = deserializeOracleFeed(Buffer.from(response.data, 'base64'));
+
+    expect(response.cid).to.equal(storedCid);
+    expect(response.version).to.be.a('string').and.not.empty;
+    expect(decodedFeed.jobs).to.have.lengthOf(1);
+    expect(serializeOracleJob(decodedFeed.jobs[0]!).toString('hex')).to.equal(
+      serializeOracleJob(job).toString('hex')
     );
-    expect(feedHash).to.eq(
-      '0xb58adb3d5c6be92817751d279c17c7f3d9b0719161e378f579759dd2302bd8a9'
-    );
-    expect(queueHex).to.eq(
-      '0xd9cd6a04191d6cd559a5276e69a79cc6f95555deeae498c3a2f8b3ee670287d1'
-    );
-    expect(jobs).to.have.lengthOf(1);
-    expect(jobs[0]).to.deep.equal(job);
   });
 
   test('Fetching from a feed hash (without `0x` prefix).', async () => {
-    const { feedHash, queueHex, jobs } = await client.fetch(
-      'b58adb3d5c6be92817751d279c17c7f3d9b0719161e378f579759dd2302bd8a9'
+    const response = await client.fetchOracleFeed(storedFeedId.replace(/^0x/i, ''));
+    const decodedFeed = deserializeOracleFeed(Buffer.from(response.data, 'base64'));
+
+    expect(response.cid).to.equal(storedCid);
+    expect(decodedFeed.jobs).to.have.lengthOf(1);
+    expect(serializeOracleJob(decodedFeed.jobs[0]!).toString('hex')).to.equal(
+      serializeOracleJob(job).toString('hex')
     );
-    expect(feedHash).to.eq(
-      '0xb58adb3d5c6be92817751d279c17c7f3d9b0719161e378f579759dd2302bd8a9'
-    );
-    expect(queueHex).to.eq(
-      '0xd9cd6a04191d6cd559a5276e69a79cc6f95555deeae498c3a2f8b3ee670287d1'
-    );
-    expect(jobs).to.have.lengthOf(1);
-    expect(jobs[0]).to.deep.equal(job);
   });
 
   test('Fetching Solana updates.', async () => {
@@ -125,7 +124,9 @@ describe('CrossbarClient Tests', () => {
         .to.have.property('results')
         .that.is.an('array')
         .with.length.greaterThan(0);
-      result.results
+      const results = result.results ?? [];
+      expect(results).to.have.length.greaterThan(0);
+      results
         .map(value => Number(value))
         .forEach(val => expect(Number.isFinite(val)).to.be.true);
     });
@@ -148,7 +149,9 @@ describe('CrossbarClient Tests', () => {
         .to.have.property('results')
         .that.is.an('array')
         .with.length.greaterThan(0);
-      result.results
+      const results = result.results ?? [];
+      expect(results).to.have.length.greaterThan(0);
+      results
         .map(value => Number(value))
         .forEach(val => expect(Number.isFinite(val)).to.be.true);
     });
