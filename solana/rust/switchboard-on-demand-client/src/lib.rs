@@ -24,11 +24,11 @@
 //! ```rust,no_run
 //! use switchboard_on_demand_client::*;
 //! use solana_sdk::pubkey::Pubkey;
-//! //!
+//!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Initialize a gateway client
-//!     let gateway = Gateway::new("https://api.switchboard.xyz");
+//!     let gateway = Gateway::new("https://api.switchboard.xyz".to_string());
 //!
 //!     // Get the Switchboard program ID for current network
 //!     let program_id = get_switchboard_on_demand_program_id();

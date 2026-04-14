@@ -1,22 +1,22 @@
 #![allow(non_snake_case)]
+use crate::solana_compat::ClusterType;
+use crate::Pubkey;
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Error as AnyhowError;
+use base64::prelude::*;
 use futures::{Stream, StreamExt};
 use hex;
+use prost::Message;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize};
-use crate::solana_compat::ClusterType;
-use crate::Pubkey;
+use switchboard_protos::OracleFeed;
 use switchboard_utils::utils::median;
 use tokio::time::interval;
 use tokio::time::Duration;
 use tokio_stream::wrappers::IntervalStream;
-use switchboard_protos::OracleFeed;
-use prost::Message;
-use base64::prelude::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoreResponse {
@@ -241,7 +241,10 @@ impl CrossbarClient {
     /// * `feed_id` - The identifier of the OracleFeed to fetch
     /// # Returns
     /// * `Result<CrossbarOracleFeedFetchResponse, AnyhowError>` - The data fetched from the crossbar
-    pub async fn fetch_oracle_feed(&self, feed_id: &str) -> Result<CrossbarOracleFeedFetchResponse, AnyhowError> {
+    pub async fn fetch_oracle_feed(
+        &self,
+        feed_id: &str,
+    ) -> Result<CrossbarOracleFeedFetchResponse, AnyhowError> {
         let url = format!("{}/v2/fetch/{}", self.crossbar_url, feed_id);
         let resp = self
             .client
@@ -536,21 +539,24 @@ impl CrossbarClient {
         network: Option<&str>,
     ) -> Result<CrossbarSimulateProtoResponse, AnyhowError> {
         let mut oracle_feed_b64 = feed_or_hash.to_string();
-        
+
         // Simple heuristic: if it looks like a hash (hex, 64 chars or 66 with 0x), fetch it.
         // Otherwise assume it's base64 encoded proto.
-        let is_hash = feed_or_hash.starts_with("0x") || feed_or_hash.len() == 64; 
-        
+        let is_hash = feed_or_hash.starts_with("0x") || feed_or_hash.len() == 64;
+
         if is_hash {
-             // println!("DEBUG: Fetching feed for hash: {}", feed_or_hash);
-             let fetch_resp = self.fetch_oracle_feed(feed_or_hash).await?;
-             // println!("DEBUG: Fetched data: {}", fetch_resp.data);
-             
-             // DECODE AND RE-ENCODE logic
-             let delimited_bytes = BASE64_STANDARD.decode(&fetch_resp.data).context("Failed to decode base64")?;
-             let feed = OracleFeed::decode_length_delimited(delimited_bytes.as_slice()).context("Failed to decode length delimited proto")?;
-             let standard_bytes = feed.encode_to_vec();
-             oracle_feed_b64 = BASE64_STANDARD.encode(standard_bytes);
+            // println!("DEBUG: Fetching feed for hash: {}", feed_or_hash);
+            let fetch_resp = self.fetch_oracle_feed(feed_or_hash).await?;
+            // println!("DEBUG: Fetched data: {}", fetch_resp.data);
+
+            // DECODE AND RE-ENCODE logic
+            let delimited_bytes = BASE64_STANDARD
+                .decode(&fetch_resp.data)
+                .context("Failed to decode base64")?;
+            let feed = OracleFeed::decode_length_delimited(delimited_bytes.as_slice())
+                .context("Failed to decode length delimited proto")?;
+            let standard_bytes = feed.encode_to_vec();
+            oracle_feed_b64 = BASE64_STANDARD.encode(standard_bytes);
         }
 
         let url = format!("{}/v2/simulate/proto", self.crossbar_url);
@@ -573,12 +579,8 @@ impl CrossbarClient {
         let raw = resp.text().await.context("Failed to fetch response text")?;
 
         if !status.is_success() {
-             if self.verbose {
-                eprintln!(
-                    "{}: {}",
-                    status,
-                    raw
-                );
+            if self.verbose {
+                eprintln!("{}: {}", status, raw);
             }
             return Err(anyhow!(
                 "Bad status code {} for simulate_proto. Response: {}",
@@ -586,7 +588,7 @@ impl CrossbarClient {
                 raw
             ));
         }
-        
+
         serde_json::from_str(&raw).with_context(|| {
             format!(
                 "Failed to parse simulate_proto response. URL: {}. Raw response (first 500 chars): {}",
@@ -738,7 +740,10 @@ impl CrossbarClient {
         let interval_stream = IntervalStream::new(interval(poll_interval));
         interval_stream.then(move |_| {
             let network = network;
-            async move { self.simulate_solana_feeds(network, feed_pubkeys, include_receipts).await }
+            async move {
+                self.simulate_solana_feeds(network, feed_pubkeys, include_receipts)
+                    .await
+            }
         })
     }
 
@@ -819,16 +824,41 @@ impl CrossbarClient {
             )
         })
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solana_compat::solana_sdk::instruction::{AccountMeta, Instruction};
     use std::str::FromStr;
 
-    const LIVE_PULL_IX_HEX: &str =
-        "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573050000000000000089e0fecf1c1b3a11e77b9d1048192288ae1d8ada0e19ff95d737c4e5afb583f70001d284bd424eb258f1f502c95ff334245b64af7df6b14435d1ea46d10fb3ac68b6000086807068432f186a147cf0b13a30067d386204ea9d6c8b04743ac2ef010b075200007752c55e8b0a7079ad51975736764e45f56d61ebd15aa96d55f7ca86d5b5e387010100000000000000000000000000000000000000000000000000000000000000000000310000000000000001020304050607081d3c620d5670b1b26d0d3c7c27cb75a5187d99b8ccf8850d5b79d573b81bff7c030000009600000000";
+    const ON_DEMAND_PROGRAM_ID_HEX: &str =
+        "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573";
+    const CONSENSUS_DISCRIMINATOR: [u8; 8] = [0xef, 0x7c, 0x27, 0xb8, 0x93, 0xde, 0x10, 0xf8];
+    const PLACEHOLDER_DISCRIMINATOR: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    fn on_demand_program_id() -> Pubkey {
+        let bytes: [u8; 32] = hex::decode(ON_DEMAND_PROGRAM_ID_HEX)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        Pubkey::new_from_array(bytes)
+    }
+
+    fn valid_consensus_pull_ix_hex() -> String {
+        let mut data = CONSENSUS_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(&150u64.to_le_bytes());
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&42i128.to_le_bytes());
+
+        let instruction = Instruction {
+            program_id: on_demand_program_id(),
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), false)],
+            data,
+        };
+
+        hex::encode(bincode::serialize(&instruction).unwrap())
+    }
 
     #[tokio::test]
     async fn test_crossbar_client_default_initialization() {
@@ -845,25 +875,27 @@ mod tests {
     fn deserializes_current_pull_ixns_shape() {
         let responses: Vec<FetchSolanaUpdatesResponse> = serde_json::from_str(&format!(
             r#"[{{"success":true,"pullIxns":["{}"],"responses":[],"lookupTables":[]}}]"#,
-            LIVE_PULL_IX_HEX
+            valid_consensus_pull_ix_hex()
         ))
         .unwrap();
 
         assert_eq!(responses[0].pullIxns.len(), 1);
 
         let decoded = responses[0].decode_pull_ixns().unwrap();
-        assert_eq!(decoded[0].accounts.len(), 5);
+        assert_eq!(decoded[0].accounts.len(), 1);
         assert_eq!(
             hex::encode(decoded[0].program_id.to_bytes()),
-            "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573"
+            ON_DEMAND_PROGRAM_ID_HEX
         );
+        assert!(decoded[0].data.starts_with(&CONSENSUS_DISCRIMINATOR));
+        assert!(!decoded[0].data.starts_with(&PLACEHOLDER_DISCRIMINATOR));
     }
 
     #[test]
     fn rejects_legacy_pull_ix_shape() {
         let err = serde_json::from_str::<Vec<FetchSolanaUpdatesResponse>>(&format!(
             r#"[{{"success":true,"pullIx":"{}","responses":[],"lookupTables":[]}}]"#,
-            LIVE_PULL_IX_HEX
+            valid_consensus_pull_ix_hex()
         ))
         .unwrap_err();
 

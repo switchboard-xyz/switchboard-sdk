@@ -32,7 +32,9 @@ pub struct FetchSolanaUpdatesResponse {
 }
 
 impl FetchSolanaUpdatesResponse {
-    pub fn decode_pull_ixns(&self) -> Result<Vec<solana_sdk::instruction::Instruction>, AnyhowError> {
+    pub fn decode_pull_ixns(
+        &self,
+    ) -> Result<Vec<solana_sdk::instruction::Instruction>, AnyhowError> {
         self.pullIxns
             .iter()
             .enumerate()
@@ -351,7 +353,8 @@ impl CrossbarClient {
             resp.json().await.context("Failed to parse response")?;
         // Compute the median result for each response
         for response in responses.iter_mut() {
-            response.result = median(response.results.as_slice()).expect("Failed to compute median");
+            response.result =
+                median(response.results.as_slice()).expect("Failed to compute median");
         }
         Ok(responses)
     }
@@ -548,23 +551,54 @@ impl CrossbarClient {
         let status = resp.status();
         if !status.is_success() {
             if self.verbose {
-                eprintln!("{}: {}", status, resp.text().await.context("Failed to fetch response")?);
+                eprintln!(
+                    "{}: {}",
+                    status,
+                    resp.text().await.context("Failed to fetch response")?
+                );
             }
             return Err(anyhow!("Bad status code {}", status.as_u16()));
         }
 
-        resp.json().await.context("Failed to parse gateways response")
+        resp.json()
+            .await
+            .context("Failed to parse gateways response")
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
     use std::str::FromStr;
 
-    const LIVE_PULL_IX_HEX: &str =
-        "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573050000000000000089e0fecf1c1b3a11e77b9d1048192288ae1d8ada0e19ff95d737c4e5afb583f70001d284bd424eb258f1f502c95ff334245b64af7df6b14435d1ea46d10fb3ac68b6000086807068432f186a147cf0b13a30067d386204ea9d6c8b04743ac2ef010b075200007752c55e8b0a7079ad51975736764e45f56d61ebd15aa96d55f7ca86d5b5e387010100000000000000000000000000000000000000000000000000000000000000000000310000000000000001020304050607081d3c620d5670b1b26d0d3c7c27cb75a5187d99b8ccf8850d5b79d573b81bff7c030000009600000000";
+    const ON_DEMAND_PROGRAM_ID_HEX: &str =
+        "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573";
+    const CONSENSUS_DISCRIMINATOR: [u8; 8] = [0xef, 0x7c, 0x27, 0xb8, 0x93, 0xde, 0x10, 0xf8];
+    const PLACEHOLDER_DISCRIMINATOR: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    fn on_demand_program_id() -> Pubkey {
+        let bytes: [u8; 32] = hex::decode(ON_DEMAND_PROGRAM_ID_HEX)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        Pubkey::new_from_array(bytes)
+    }
+
+    fn valid_consensus_pull_ix_hex() -> String {
+        let mut data = CONSENSUS_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(&150u64.to_le_bytes());
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&42i128.to_le_bytes());
+
+        let instruction = Instruction {
+            program_id: on_demand_program_id(),
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), false)],
+            data,
+        };
+
+        hex::encode(bincode::serialize(&instruction).unwrap())
+    }
 
     #[tokio::test]
     async fn test_crossbar_client_default_initialization() {
@@ -581,25 +615,27 @@ mod tests {
     fn deserializes_current_pull_ixns_shape() {
         let responses: Vec<FetchSolanaUpdatesResponse> = serde_json::from_str(&format!(
             r#"[{{"success":true,"pullIxns":["{}"],"responses":[],"lookupTables":[]}}]"#,
-            LIVE_PULL_IX_HEX
+            valid_consensus_pull_ix_hex()
         ))
         .unwrap();
 
         assert_eq!(responses[0].pullIxns.len(), 1);
 
         let decoded = responses[0].decode_pull_ixns().unwrap();
-        assert_eq!(decoded[0].accounts.len(), 5);
+        assert_eq!(decoded[0].accounts.len(), 1);
         assert_eq!(
             hex::encode(decoded[0].program_id.to_bytes()),
-            "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573"
+            ON_DEMAND_PROGRAM_ID_HEX
         );
+        assert!(decoded[0].data.starts_with(&CONSENSUS_DISCRIMINATOR));
+        assert!(!decoded[0].data.starts_with(&PLACEHOLDER_DISCRIMINATOR));
     }
 
     #[test]
     fn rejects_legacy_pull_ix_shape() {
         let err = serde_json::from_str::<Vec<FetchSolanaUpdatesResponse>>(&format!(
             r#"[{{"success":true,"pullIx":"{}","responses":[],"lookupTables":[]}}]"#,
-            LIVE_PULL_IX_HEX
+            valid_consensus_pull_ix_hex()
         ))
         .unwrap_err();
 

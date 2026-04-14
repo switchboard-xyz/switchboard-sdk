@@ -27,7 +27,8 @@
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "prepack": "pnpm build",
     "test": "pnpm exec jest --passWithNoTests",
-    "test:authority-quote": "pnpm exec tsx test/oracleQuote.authority.test.ts"
+    "test:authority-quote": "pnpm exec tsx test/oracleQuote.authority.smoke.ts",
+    "test:pull-feed-discriminators": "pnpm exec tsx test/pullFeed.discriminators.smoke.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor-31": "npm:@coral-xyz/anchor@0.31.1",
