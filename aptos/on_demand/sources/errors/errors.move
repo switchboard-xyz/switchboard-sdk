@@ -63,6 +63,21 @@ module switchboard::errors {
   // Guardian does not exist
   const EGUARDIAN_DOES_NOT_EXIST: u64 = 21;
 
+  // Invalid signature
+  const EINVALID_SIGNATURE: u64 = 22;
+
+  // Duplicate oracle in request
+  const EDUPLICATE_ORACLE: u64 = 23;
+
+  // Duplicate aggregator in request
+  const EDUPLICATE_AGGREGATOR: u64 = 24;
+
+  // Insufficient signatures
+  const EINSUFFICIENT_SIGNATURES: u64 = 25;
+
+  // Stale result bundle
+  const ESTALE_RESULT: u64 = 26;
+
   // ---- Functions ----
 
   public fun invalid_authority(): u64 {
@@ -147,5 +162,25 @@ module switchboard::errors {
 
   public fun guardian_does_not_exist(): u64 {
     EGUARDIAN_DOES_NOT_EXIST
+  }
+
+  public fun invalid_signature(): u64 {
+    EINVALID_SIGNATURE
+  }
+
+  public fun duplicate_oracle(): u64 {
+    EDUPLICATE_ORACLE
+  }
+
+  public fun duplicate_aggregator(): u64 {
+    EDUPLICATE_AGGREGATOR
+  }
+
+  public fun insufficient_signatures(): u64 {
+    EINSUFFICIENT_SIGNATURES
+  }
+
+  public fun stale_result(): u64 {
+    ESTALE_RESULT
   }
 }

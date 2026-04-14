@@ -160,6 +160,51 @@ module switchboard::hash {
         hash::sha2_256(msg)
     }
 
+    public fun generate_v2_update_msg(
+        slot: u64,
+        timestamp: u64,
+        feed_hashes: vector<vector<u8>>,
+        values: vector<Decimal>,
+        min_oracle_samples: vector<u8>,
+    ): vector<u8> {
+        let hasher = new();
+        assert!(vector::length(&feed_hashes) == vector::length(&values), 1347);
+        assert!(vector::length(&feed_hashes) == vector::length(&min_oracle_samples), 1348);
+
+        push_u64_le(&mut hasher, slot);
+        push_u64_le(&mut hasher, timestamp);
+
+        let idx = 0;
+        while (idx < vector::length(&feed_hashes)) {
+            let feed_hash = *vector::borrow(&feed_hashes, idx);
+            assert!(vector::length(&feed_hash) == 32, 1345);
+            push_bytes(&mut hasher, feed_hash);
+            push_decimal_le(&mut hasher, vector::borrow(&values, idx));
+            push_u8(&mut hasher, *vector::borrow(&min_oracle_samples, idx));
+            idx = idx + 1;
+        };
+
+        let Hasher { buffer } = hasher;
+        buffer
+    }
+
+    public fun generate_v2_update_hash(
+        slot: u64,
+        timestamp: u64,
+        feed_hashes: vector<vector<u8>>,
+        values: vector<Decimal>,
+        min_oracle_samples: vector<u8>,
+    ): vector<u8> {
+        let msg = generate_v2_update_msg(
+            slot,
+            timestamp,
+            feed_hashes,
+            values,
+            min_oracle_samples,
+        );
+        hash::sha2_256(msg)
+    }
+
     public fun generate_attestation_hash(
         oracle_key: vector<u8>, 
         queue_key: vector<u8>,
@@ -298,5 +343,77 @@ module switchboard::hash {
         let recovered_pubkey = secp256k1::ecdsa_raw_public_key_to_bytes(&option::extract(&mut recovered_pubkey));
         let expected_signer = x"072814bfdd26bcbeb9ecd2872f77b51012b11909726ce2ba64b3634f43d0ea12fa01e2fffe1c3b54305a83fe3365d4ee0579e98382ff9b4fb1e22baaee95dc7c";
         assert!(recovered_pubkey == expected_signer, err);
+    }
+
+    #[test]
+    fun test_v2_update_msg_fixture() {
+        let err: u64 = 1350;
+        let feed_hashes = vector::empty<vector<u8>>();
+        vector::push_back(
+            &mut feed_hashes,
+            x"1111111111111111111111111111111111111111111111111111111111111111",
+        );
+        vector::push_back(
+            &mut feed_hashes,
+            x"2222222222222222222222222222222222222222222222222222222222222222",
+        );
+
+        let values = vector::empty<Decimal>();
+        vector::push_back(&mut values, decimal::new(123, false));
+        vector::push_back(&mut values, decimal::new(456, true));
+
+        let min_oracle_samples = vector::empty<u8>();
+        vector::push_back(&mut min_oracle_samples, 1);
+        vector::push_back(&mut min_oracle_samples, 3);
+
+        let msg = generate_v2_update_msg(
+            42,
+            1234567890,
+            feed_hashes,
+            values,
+            min_oracle_samples,
+        );
+
+        assert!(
+            msg
+                == x"2a00000000000000d20296490000000011111111111111111111111111111111111111111111111111111111111111117b00000000000000000000000000000001222222222222222222222222222222222222222222222222222222222222222238feffffffffffffffffffffffffffff03",
+            err
+        );
+    }
+
+    #[test]
+    fun test_v2_update_hash_fixture() {
+        let err: u64 = 1349;
+        let feed_hashes = vector::empty<vector<u8>>();
+        vector::push_back(
+            &mut feed_hashes,
+            x"1111111111111111111111111111111111111111111111111111111111111111",
+        );
+        vector::push_back(
+            &mut feed_hashes,
+            x"2222222222222222222222222222222222222222222222222222222222222222",
+        );
+
+        let values = vector::empty<Decimal>();
+        vector::push_back(&mut values, decimal::new(123, false));
+        vector::push_back(&mut values, decimal::new(456, true));
+
+        let min_oracle_samples = vector::empty<u8>();
+        vector::push_back(&mut min_oracle_samples, 1);
+        vector::push_back(&mut min_oracle_samples, 3);
+
+        let digest = generate_v2_update_hash(
+            42,
+            1234567890,
+            feed_hashes,
+            values,
+            min_oracle_samples,
+        );
+
+        assert!(
+            digest
+                == x"b1150a89640f8091027fd408d50f666d4738872714d979f25b7bebec5db3f584",
+            err
+        );
     }
 }

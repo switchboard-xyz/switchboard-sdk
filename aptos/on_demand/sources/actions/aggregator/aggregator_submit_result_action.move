@@ -1,4 +1,6 @@
 module switchboard::aggregator_submit_result_action {
+    friend switchboard::update_action;
+
     use std::type_info;
     use std::vector;
     use std::option;
@@ -148,21 +150,16 @@ module switchboard::aggregator_submit_result_action {
         (true, oracle_address)
     }
 
-    fun actuate<CoinType>(
+    public(friend) fun actuate_verified_result<CoinType>(
         account: &signer,
-        params: AggregatorSubmitResultParams,
+        aggregator_object: Object<Aggregator>,
+        queue: Object<Queue>,
         extracted_oracle_address: address,
+        value: u128,
+        neg: bool,
+        timestamp_seconds: u64,
     ) {
-        let aggregator_address = object::object_address(&params.aggregator);
-        let AggregatorSubmitResultParams {
-            aggregator: aggregator_object,
-            queue,
-            oracle: _,
-            value,
-            neg,
-            timestamp_seconds,
-            signature: _,
-        } = params;
+        let aggregator_address = object::object_address(&aggregator_object);
 
         // add result to aggregator
         aggregator::add_result(
@@ -190,6 +187,32 @@ module switchboard::aggregator_submit_result_action {
             value: decimal::new(value, neg),
             timestamp: timestamp_seconds,
         });
+    }
+
+    fun actuate<CoinType>(
+        account: &signer,
+        params: AggregatorSubmitResultParams,
+        extracted_oracle_address: address,
+    ) {
+        let AggregatorSubmitResultParams {
+            aggregator: aggregator_object,
+            queue,
+            oracle: _,
+            value,
+            neg,
+            timestamp_seconds,
+            signature: _,
+        } = params;
+
+        actuate_verified_result<CoinType>(
+            account,
+            aggregator_object,
+            queue,
+            extracted_oracle_address,
+            value,
+            neg,
+            timestamp_seconds,
+        );
     }
 
     public entry fun run<CoinType>(
