@@ -46,20 +46,38 @@ function assertDiscriminator(
   assert.notDeepEqual(discriminator, PLACEHOLDER_DISCRIMINATOR);
 }
 
+type MockInstructionContext = {
+  accounts?: Record<string, web3.PublicKey>;
+  remainingAccounts?: web3.AccountMeta[];
+};
+
 function createMockProgram(): {
   program: Program;
-  calls: { legacy: number; consensus: number; svm: number };
+  calls: {
+    legacy: number;
+    consensus: number;
+    svm: number;
+    legacyContexts: MockInstructionContext[];
+    consensusContexts: MockInstructionContext[];
+  };
 } {
-  const calls = { legacy: 0, consensus: 0, svm: 0 };
+  const calls = {
+    legacy: 0,
+    consensus: 0,
+    svm: 0,
+    legacyContexts: [] as MockInstructionContext[],
+    consensusContexts: [] as MockInstructionContext[],
+  };
   const program = {
     programId: ON_DEMAND_PROGRAM_ID,
     provider: { publicKey: PAYER },
     instruction: {
       pullFeedSubmitResponseConsensus: (
         _data: unknown,
-        context: { remainingAccounts?: web3.AccountMeta[] }
+        context: MockInstructionContext
       ) => {
         calls.consensus += 1;
+        calls.consensusContexts.push(context);
         return instructionWithDiscriminator(
           'pull_feed_submit_response_consensus',
           context.remainingAccounts
@@ -67,9 +85,10 @@ function createMockProgram(): {
       },
       pullFeedSubmitResponse: (
         _data: unknown,
-        context: { remainingAccounts?: web3.AccountMeta[] }
+        context: MockInstructionContext
       ) => {
         calls.legacy += 1;
+        calls.legacyContexts.push(context);
         return instructionWithDiscriminator(
           'pull_feed_submit_response',
           context.remainingAccounts
@@ -77,7 +96,7 @@ function createMockProgram(): {
       },
       pullFeedSubmitResponseSvm: () => {
         calls.svm += 1;
-        throw new Error('SVM submit path should not be used for Solana feeds');
+        throw new Error('SVM submit path should not be used');
       },
     },
   } as unknown as Program;
@@ -165,12 +184,68 @@ function testLowerLevelSubmitHelperUsesLegacyDiscriminator(): void {
 
   assert.equal(calls.legacy, 1);
   assert.equal(calls.consensus, 0);
+  assert.equal(calls.svm, 0);
   assertDiscriminator(instruction, 'pull_feed_submit_response');
+}
+
+function testNonSolanaSubmitHelperUsesLegacyInstructionWithPdas(): void {
+  const { program, calls } = createMockProgram();
+  const feed = new PullFeed(program, FEED);
+  const instruction = feed.getSolanaSubmitSignaturesIx({
+    resps: [feedEvalResponse() as any],
+    offsets: [0],
+    slot: new BN(150),
+    payer: PAYER,
+    chain: 'aptos',
+  });
+
+  const [queuePda] = web3.PublicKey.findProgramAddressSync(
+    [Buffer.from('Queue'), QUEUE.toBuffer()],
+    ON_DEMAND_PROGRAM_ID
+  );
+  const [oraclePda] = web3.PublicKey.findProgramAddressSync(
+    [Buffer.from('Oracle'), queuePda.toBuffer(), ORACLE.toBuffer()],
+    ON_DEMAND_PROGRAM_ID
+  );
+  const [oracleStatsPda] = web3.PublicKey.findProgramAddressSync(
+    [Buffer.from('OracleStats'), oraclePda.toBuffer()],
+    ON_DEMAND_PROGRAM_ID
+  );
+
+  assert.equal(calls.legacy, 1);
+  assert.equal(calls.consensus, 0);
+  assert.equal(calls.svm, 0);
+  assertDiscriminator(instruction, 'pull_feed_submit_response');
+
+  const legacyContext = calls.legacyContexts[0];
+  assert.ok(legacyContext);
+  assert.ok(legacyContext.accounts?.queue.equals(queuePda));
+  assert.ok(!legacyContext.accounts?.queue.equals(QUEUE));
+  assert.deepEqual(
+    legacyContext.remainingAccounts?.map(account => ({
+      pubkey: account.pubkey.toBase58(),
+      isSigner: account.isSigner,
+      isWritable: account.isWritable,
+    })),
+    [
+      {
+        pubkey: oraclePda.toBase58(),
+        isSigner: false,
+        isWritable: false,
+      },
+      {
+        pubkey: oracleStatsPda.toBase58(),
+        isSigner: false,
+        isWritable: true,
+      },
+    ]
+  );
 }
 
 async function run(): Promise<void> {
   await testFetchUpdateManyUsesConsensusDiscriminator();
   testLowerLevelSubmitHelperUsesLegacyDiscriminator();
+  testNonSolanaSubmitHelperUsesLegacyInstructionWithPdas();
 }
 
 run()
