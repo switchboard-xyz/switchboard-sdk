@@ -5,6 +5,16 @@ This crate is designed to interact with Switchboard on-demand, the Crossbar serv
 ## Crossbar
 A middleman service to fetch oracle jobs from IPFS and to return feed price simulations. This is useful for updating a price constantly instead of sending requests directly to oracles.
 
+## Release guardrail
+
+Before publishing this crate to crates.io, commit the release changes to `main` or create a release tag that points at the release commit, then run:
+
+```bash
+rust/switchboard-on-demand-client/scripts/verify-crate-release.sh
+```
+
+The script refuses to package from a dirty tree, refuses non-`main` branches unless the commit is tagged, and verifies the generated crate's `.cargo_vcs_info.json` has `dirty = false` and points at the release commit. Do not publish if this check fails.
+
 ## Gateways
 The frontend to interact with Switchboard oracles.
 
