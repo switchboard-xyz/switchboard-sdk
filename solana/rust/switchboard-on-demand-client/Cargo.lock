@@ -4803,7 +4803,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-on-demand-client"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow_ext",
  "arrayref",
@@ -4834,9 +4834,9 @@ dependencies = [
 
 [[package]]
 name = "switchboard-protos"
-version = "0.2.4"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d807f905f076b3feee4cdd05eb7fd6850eb0fb9a49039bcf3734bd5846f7a2a"
+checksum = "dfe8595504af7819a8b0cf16825a0ea992ac60fc0bab6ff22d96c05081161769"
 dependencies = [
  "pbjson 0.7.0",
  "pbjson-build",
