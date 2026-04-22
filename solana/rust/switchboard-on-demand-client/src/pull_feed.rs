@@ -437,6 +437,7 @@ impl PullFeed {
                 num_signatures: Some(num_signatures),
                 feed_configs,
                 use_timestamp: Some(false),
+                debug: params.debug,
             })
             .await
             .context("PullFeed.fetchUpdateIx: fetch signatures consensus failure")?;

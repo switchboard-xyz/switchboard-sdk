@@ -20,6 +20,7 @@ pub struct FetchSignaturesConsensusParams {
     pub feed_configs: Vec<FeedConfig>, // Your existing FeedConfig struct
     pub use_timestamp: Option<bool>,
     pub num_signatures: Option<u32>,
+    pub debug: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,7 +307,9 @@ impl Gateway {
             "{}/gateway/api/v1/fetch_signatures_consensus",
             self.gateway_url
         );
-        println!("Fetching signatures from: {}", url);
+        if params.debug.unwrap_or(false) {
+            println!("Fetching signatures from: {}", url);
+        }
         // Build feed_requests array from feed_configs
         let feed_requests: Vec<serde_json::Value> = params
             .feed_configs
