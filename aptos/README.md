@@ -58,18 +58,28 @@ module example::switchboard_example {
     use switchboard::decimal::Decimal;
     use switchboard::update_action;
 
-    public entry fun my_function(account: &signer, update_data: vector<vector<u8>>) {
+    /**
+    * If you need to remove and process Switchboard v1 updates from a mixed
+    * `vector<vector<u8>>`, you can use:
+    *
+    * update_action::extract_and_run<AptosCoin>(account, &mut update_data);
+    */
+
+    // Legacy v1 update path
+    public entry fun my_function_v1(account: &signer, update_data: vector<vector<u8>>) {
 
         // Update the feed with the provided data
         update_action::run<AptosCoin>(account, update_data);
+        read_current_result();
+    }
 
-        /**
-        * You can use the following code to remove and run switchboard updates from the update_data vector,
-        * keeping only non-switchboard byte vectors:
-        *
-        * update_action::extract_and_run<AptosCoin>(account, &mut update_data);
-        */
+    // Native v2 update path
+    public entry fun my_function_v2(account: &signer, update_data: vector<u8>) {
+        update_action::run_v2<AptosCoin>(account, update_data);
+        read_current_result();
+    }
 
+    fun read_current_result() {
         // Get the feed object
         let aggregator: address = @0xSomeFeedAddress;
         let aggregator: Object<Aggregator> = object::address_to_object<Aggregator>(aggregator);

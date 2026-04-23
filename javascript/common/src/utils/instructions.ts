@@ -26,7 +26,9 @@ function readU64LE(buffer: Buffer, offset: number, label: string): number {
 
   const value = Number(buffer.readBigUInt64LE(offset));
   if (!Number.isSafeInteger(value)) {
-    throw new Error(`Serialized instruction ${label} exceeds safe integer size`);
+    throw new Error(
+      `Serialized instruction ${label} exceeds safe integer size`
+    );
   }
   return value;
 }
@@ -102,7 +104,9 @@ function serializedIxFromHex(serializedHex: string): TransactionInstruction {
   offset += dataLength;
 
   if (offset !== buffer.length) {
-    throw new Error('Serialized instruction contains unexpected trailing bytes');
+    throw new Error(
+      'Serialized instruction contains unexpected trailing bytes'
+    );
   }
 
   return new TransactionInstruction({

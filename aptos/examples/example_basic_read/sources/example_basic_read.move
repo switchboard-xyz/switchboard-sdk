@@ -39,4 +39,23 @@ module example::example_basic_read {
             timestamp: timestamp_seconds,
         });
     }
+
+    public entry fun update_and_read_feed_v2(
+        account: &signer,
+        update_data: vector<u8>,
+    ) {
+        update_action::run_v2<AptosCoin>(account, update_data);
+
+        let aggregator: address = @0x4bac6bbbecfe7be5298358deaf1bf2da99c697fea16a3cf9b0e340cb557b05a8;
+        let aggregator: Object<Aggregator> = object::address_to_object<Aggregator>(aggregator);
+        let current_result: CurrentResult = aggregator::current_result(aggregator);
+        let result: Decimal = aggregator::result(&current_result);
+        let timestamp_seconds = aggregator::timestamp(&current_result);
+
+        event::emit(AggregatorUpdated {
+            aggregator: object::object_address(&aggregator),
+            value: result,
+            timestamp: timestamp_seconds,
+        });
+    }
 }

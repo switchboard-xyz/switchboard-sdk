@@ -15,4 +15,4 @@ example = '0x55'
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "main", subdir = "aptos-move/framework/aptos-framework"}
 AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "main", subdir = "aptos-move/framework/aptos-stdlib"}
 MoveStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "main", subdir = "aptos-move/framework/move-stdlib"}
-Switchboard = { git = "https://github.com/switchboard-xyz/aptos.git", rev = "main", subdir = "on_demand"}
+Switchboard = { local = "../../on_demand" }

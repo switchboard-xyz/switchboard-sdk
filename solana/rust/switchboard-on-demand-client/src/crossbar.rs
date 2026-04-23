@@ -3,14 +3,19 @@ use anyhow_ext::anyhow;
 use anyhow_ext::Context;
 use anyhow_ext::Error as AnyhowError;
 use base58::ToBase58;
+use base64::prelude::*;
 use futures::{Stream, StreamExt};
 use hex;
+use prost::Message;
+use protos::OracleFeed;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::de::Error as DeError;
+use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use solana_sdk::genesis_config::ClusterType;
 use solana_sdk::pubkey::Pubkey;
+use std::fmt;
 use switchboard_utils::utils::median;
 use tokio::time::interval;
 use tokio::time::Duration;
@@ -24,15 +29,24 @@ pub struct StoreResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct OracleFeedStoreResponse {
+    pub cid: String,
+    pub feedId: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FetchSolanaUpdatesResponse {
     pub success: bool,
+    #[serde(default, alias = "pullIx", deserialize_with = "deserialize_pull_ixns")]
     pub pullIxns: Vec<String>,
     pub responses: Vec<Response>,
     pub lookupTables: Vec<String>,
 }
 
 impl FetchSolanaUpdatesResponse {
-    pub fn decode_pull_ixns(&self) -> Result<Vec<solana_sdk::instruction::Instruction>, AnyhowError> {
+    pub fn decode_pull_ixns(
+        &self,
+    ) -> Result<Vec<solana_sdk::instruction::Instruction>, AnyhowError> {
         self.pullIxns
             .iter()
             .enumerate()
@@ -47,6 +61,50 @@ impl FetchSolanaUpdatesResponse {
 fn decode_instruction(ix_hex: &str) -> Result<solana_sdk::instruction::Instruction, AnyhowError> {
     let bytes = hex::decode(ix_hex).context("Failed to decode instruction hex")?;
     bincode::deserialize(&bytes).context("Failed to deserialize instruction bytes")
+}
+
+fn deserialize_pull_ixns<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct PullIxnsVisitor;
+
+    impl<'de> Visitor<'de> for PullIxnsVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str(
+                "a serialized instruction string or a list of serialized instruction strings",
+            )
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            Ok(vec![value.to_string()])
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            Ok(vec![value])
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element::<String>()? {
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_any(PullIxnsVisitor)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,6 +144,19 @@ pub struct SimulateFeedsResponse {
     pub results: Vec<Decimal>,
     #[serde(skip_deserializing, default)]
     pub result: Decimal,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CrossbarSimulateProtoResponse {
+    pub feedHash: Option<String>,
+    pub results: Vec<String>,
+    #[serde(default)]
+    pub logs: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CrossbarOracleFeedFetchResponse {
+    pub data: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -196,6 +267,30 @@ impl CrossbarClient {
         resp.json().await.context("Failed to parse response")
     }
 
+    /// Fetch an OracleFeed protobuf payload from the Crossbar V2 API.
+    pub async fn fetch_oracle_feed(
+        &self,
+        feed_id: &str,
+    ) -> Result<CrossbarOracleFeedFetchResponse, AnyhowError> {
+        let url = format!("{}/v2/fetch/{}", self.crossbar_url, feed_id);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to send v2 fetch request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!("{}", resp.text().await.context("Failed to fetch response")?);
+            }
+            return Err(anyhow!("Bad status code {}", status.as_u16()));
+        }
+
+        resp.json().await.context("Failed to parse response")
+    }
+
     /// Store feed jobs in the crossbar gateway to a pinned IPFS address
     pub async fn store(
         &self,
@@ -217,6 +312,38 @@ impl CrossbarClient {
             .send()
             .await
             .context("Failed to send store request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!(
+                    "{}: {}",
+                    status,
+                    resp.text().await.context("Failed to fetch response")?
+                );
+            }
+            return Err(anyhow!("Bad status code {}", status.as_u16()));
+        }
+
+        resp.json().await.context("Failed to parse response")
+    }
+
+    /// Store an OracleFeed-compatible JSON payload through the Crossbar V2 API.
+    pub async fn store_oracle_feed(
+        &self,
+        feed: &serde_json::Value,
+    ) -> Result<OracleFeedStoreResponse, AnyhowError> {
+        let url = format!("{}/v2/store", self.crossbar_url);
+        let payload = serde_json::json!({ "feed": feed });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .context("Failed to send v2 store request")?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -351,9 +478,64 @@ impl CrossbarClient {
             resp.json().await.context("Failed to parse response")?;
         // Compute the median result for each response
         for response in responses.iter_mut() {
-            response.result = median(response.results.as_slice()).expect("Failed to compute median");
+            response.result =
+                median(response.results.as_slice()).expect("Failed to compute median");
         }
         Ok(responses)
+    }
+
+    /// Simulate an OracleFeed through the Crossbar V2 proto endpoint.
+    ///
+    /// `feed_or_hash` may be either a feed hash or a base64 encoded OracleFeed proto.
+    pub async fn simulate_proto(
+        &self,
+        feed_or_hash: &str,
+        include_receipts: bool,
+        network: Option<&str>,
+    ) -> Result<CrossbarSimulateProtoResponse, AnyhowError> {
+        let mut oracle_feed_b64 = feed_or_hash.to_string();
+        let feed_hash = feed_or_hash.strip_prefix("0x").unwrap_or(feed_or_hash);
+        let is_hash = feed_hash.len() == 64 && feed_hash.chars().all(|c| c.is_ascii_hexdigit());
+
+        if is_hash {
+            let fetch_resp = self.fetch_oracle_feed(feed_or_hash).await?;
+            let delimited_bytes = BASE64_STANDARD
+                .decode(&fetch_resp.data)
+                .context("Failed to decode base64 OracleFeed")?;
+            let feed = OracleFeed::decode_length_delimited(delimited_bytes.as_slice())
+                .context("Failed to decode length-delimited OracleFeed")?;
+            oracle_feed_b64 = BASE64_STANDARD.encode(feed.encode_to_vec());
+        }
+
+        let url = format!("{}/v2/simulate/proto", self.crossbar_url);
+        let payload = serde_json::json!({
+            "oracleFeed": oracle_feed_b64,
+            "includeReceipts": include_receipts,
+            "network": network.unwrap_or("mainnet"),
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .context("Failed to send v2 simulate request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            if self.verbose {
+                eprintln!(
+                    "{}: {}",
+                    status,
+                    resp.text().await.context("Failed to fetch response")?
+                );
+            }
+            return Err(anyhow!("Bad status code {}", status.as_u16()));
+        }
+
+        resp.json().await.context("Failed to parse response")
     }
 
     /// Fetch the Sui feed update from the crossbar gateway.
@@ -548,23 +730,54 @@ impl CrossbarClient {
         let status = resp.status();
         if !status.is_success() {
             if self.verbose {
-                eprintln!("{}: {}", status, resp.text().await.context("Failed to fetch response")?);
+                eprintln!(
+                    "{}: {}",
+                    status,
+                    resp.text().await.context("Failed to fetch response")?
+                );
             }
             return Err(anyhow!("Bad status code {}", status.as_u16()));
         }
 
-        resp.json().await.context("Failed to parse gateways response")
+        resp.json()
+            .await
+            .context("Failed to parse gateways response")
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
     use std::str::FromStr;
 
-    const LIVE_PULL_IX_HEX: &str =
-        "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573050000000000000089e0fecf1c1b3a11e77b9d1048192288ae1d8ada0e19ff95d737c4e5afb583f70001d284bd424eb258f1f502c95ff334245b64af7df6b14435d1ea46d10fb3ac68b6000086807068432f186a147cf0b13a30067d386204ea9d6c8b04743ac2ef010b075200007752c55e8b0a7079ad51975736764e45f56d61ebd15aa96d55f7ca86d5b5e387010100000000000000000000000000000000000000000000000000000000000000000000310000000000000001020304050607081d3c620d5670b1b26d0d3c7c27cb75a5187d99b8ccf8850d5b79d573b81bff7c030000009600000000";
+    const ON_DEMAND_PROGRAM_ID_HEX: &str =
+        "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573";
+    const CONSENSUS_DISCRIMINATOR: [u8; 8] = [0xef, 0x7c, 0x27, 0xb8, 0x93, 0xde, 0x10, 0xf8];
+    const PLACEHOLDER_DISCRIMINATOR: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    fn on_demand_program_id() -> Pubkey {
+        let bytes: [u8; 32] = hex::decode(ON_DEMAND_PROGRAM_ID_HEX)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        Pubkey::new_from_array(bytes)
+    }
+
+    fn valid_consensus_pull_ix_hex() -> String {
+        let mut data = CONSENSUS_DISCRIMINATOR.to_vec();
+        data.extend_from_slice(&150u64.to_le_bytes());
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&42i128.to_le_bytes());
+
+        let instruction = Instruction {
+            program_id: on_demand_program_id(),
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), false)],
+            data,
+        };
+
+        hex::encode(bincode::serialize(&instruction).unwrap())
+    }
 
     #[tokio::test]
     async fn test_crossbar_client_default_initialization() {
@@ -580,29 +793,37 @@ mod tests {
     #[test]
     fn deserializes_current_pull_ixns_shape() {
         let responses: Vec<FetchSolanaUpdatesResponse> = serde_json::from_str(&format!(
-            r#"[{{"success":true,"pullIxns":["{}"],"responses":[],"lookupTables":[]}}]"#,
-            LIVE_PULL_IX_HEX
+            r#"[{{"success":true,"pullIxns":["{}","{}"],"responses":[],"lookupTables":[]}}]"#,
+            valid_consensus_pull_ix_hex(),
+            valid_consensus_pull_ix_hex()
+        ))
+        .unwrap();
+
+        assert_eq!(responses[0].pullIxns.len(), 2);
+
+        let decoded = responses[0].decode_pull_ixns().unwrap();
+        assert_eq!(decoded.len(), 2);
+        for ix in decoded {
+            assert_eq!(ix.accounts.len(), 1);
+            assert_eq!(
+                hex::encode(ix.program_id.to_bytes()),
+                ON_DEMAND_PROGRAM_ID_HEX
+            );
+            assert!(ix.data.starts_with(&CONSENSUS_DISCRIMINATOR));
+            assert!(!ix.data.starts_with(&PLACEHOLDER_DISCRIMINATOR));
+        }
+    }
+
+    #[test]
+    fn deserializes_legacy_pull_ix_shape() {
+        let responses = serde_json::from_str::<Vec<FetchSolanaUpdatesResponse>>(&format!(
+            r#"[{{"success":true,"pullIx":"{}","responses":[],"lookupTables":[]}}]"#,
+            valid_consensus_pull_ix_hex()
         ))
         .unwrap();
 
         assert_eq!(responses[0].pullIxns.len(), 1);
-
         let decoded = responses[0].decode_pull_ixns().unwrap();
-        assert_eq!(decoded[0].accounts.len(), 5);
-        assert_eq!(
-            hex::encode(decoded[0].program_id.to_bytes()),
-            "0673bd46f2e47e04f12bd92fb731968ecd9d9757c274da87476f465c040c6573"
-        );
-    }
-
-    #[test]
-    fn rejects_legacy_pull_ix_shape() {
-        let err = serde_json::from_str::<Vec<FetchSolanaUpdatesResponse>>(&format!(
-            r#"[{{"success":true,"pullIx":"{}","responses":[],"lookupTables":[]}}]"#,
-            LIVE_PULL_IX_HEX
-        ))
-        .unwrap_err();
-
-        assert!(err.to_string().contains("missing field"));
+        assert!(decoded[0].data.starts_with(&CONSENSUS_DISCRIMINATOR));
     }
 }

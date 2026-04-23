@@ -25,6 +25,12 @@ function isNonSolana(queue: web3.PublicKey): boolean {
   );
 }
 
+export interface RandomnessCloseLutIxParams {
+  randomness: web3.PublicKey;
+  lutSlot: number | BN;
+  recipient: web3.PublicKey;
+}
+
 /**
  * Switchboard commit-reveal randomness.
  * This account type controls commit-reveal style randomness employing
@@ -73,6 +79,34 @@ export class Randomness {
   async loadData(): Promise<any> {
     return await this.program.account['randomnessAccountData'].fetch(
       this.pubkey
+    );
+  }
+
+  /**
+   * Builds a post-cooldown LUT close instruction without loading randomness data.
+   * The transaction must be signed by the randomness keypair, or CPI-invoked by
+   * the program that controls the randomness PDA.
+   */
+  static closeLutIx(
+    program: Program,
+    params: RandomnessCloseLutIxParams
+  ): web3.TransactionInstruction {
+    const lutSigner = getLutSigner(program.programId, params.randomness);
+    const lutKey = getLutKey(lutSigner, params.lutSlot);
+
+    return program.instruction.randomnessCloseLut(
+      {
+        lutSlot: new BN(params.lutSlot.toString()),
+      },
+      {
+        accounts: {
+          randomness: params.randomness,
+          lut: lutKey,
+          lutSigner: lutSigner,
+          recipient: params.recipient,
+          addressLookupTableProgram: web3.AddressLookupTableProgram.programId,
+        },
+      }
     );
   }
 
@@ -453,5 +487,21 @@ export class Randomness {
       }
     );
     return ix;
+  }
+
+  /**
+   * Builds a post-cooldown LUT close instruction without loading randomness data.
+   * The transaction must be signed by the randomness keypair, or CPI-invoked by
+   * the program that controls the randomness PDA.
+   */
+  closeLutIx(params: {
+    lutSlot: number | BN;
+    recipient: web3.PublicKey;
+  }): web3.TransactionInstruction {
+    return Randomness.closeLutIx(this.program, {
+      randomness: this.pubkey,
+      lutSlot: params.lutSlot,
+      recipient: params.recipient,
+    });
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@switchboard-xyz/on-demand",
-  "version": "3.9.0",
+  "version": "3.10.1",
   "description": "A Typescript client to interact with Switchboard On-Demand.",
   "license": "ISC",
   "main": "dist/cjs/index.js",
@@ -26,8 +26,10 @@
     "lint": "eslint \"src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "prepack": "pnpm build",
-    "test": "pnpm run test:authority-quote && pnpm run test:network-resolution",
-    "test:authority-quote": "pnpm exec tsx test/oracleQuote.authority.test.ts",
+    "test": "pnpm run test:authority-quote && pnpm run test:pull-feed-discriminators && pnpm run test:randomness-close-lut && pnpm run test:network-resolution",
+    "test:authority-quote": "pnpm exec tsx test/oracleQuote.authority.smoke.ts",
+    "test:pull-feed-discriminators": "pnpm exec tsx test/pullFeed.discriminators.smoke.ts",
+    "test:randomness-close-lut": "pnpm exec tsx test/randomness.closeLutIx.smoke.ts",
     "test:network-resolution": "pnpm exec tsx test/networkResolution.test.ts"
   },
   "dependencies": {
@@ -35,7 +37,7 @@
     "@isaacs/ttlcache": "^1.4.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
-    "@switchboard-xyz/common": "^5.7.0",
+    "@switchboard-xyz/common": "^5.8.1",
     "@switchboard-xyz/common-legacy": "^1.1.0",
     "axios": "^1.9",
     "bs58": "^6.0.0",

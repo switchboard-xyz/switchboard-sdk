@@ -1185,13 +1185,9 @@ export class PullFeed {
     let queue = new web3.PublicKey(
       Buffer.from(resps[0].queue_pubkey.toString(), 'hex')
     );
-    const sourceQueueKey = new web3.PublicKey(
-      Buffer.from(resps[0].queue_pubkey.toString(), 'hex')
-    );
-    let queueBump = 0;
 
     if (!isSolana) {
-      [queue, queueBump] = web3.PublicKey.findProgramAddressSync(
+      [queue] = web3.PublicKey.findProgramAddressSync(
         [Buffer.from('Queue'), queue.toBuffer()],
         program.programId
       );
@@ -1234,8 +1230,6 @@ export class PullFeed {
         ...x,
         signature: Buffer.from(x.signature, 'base64'),
       })),
-      sourceQueueKey: isSolana ? undefined : sourceQueueKey,
-      queueBump: isSolana ? undefined : queueBump,
     };
 
     const accounts = {
@@ -1267,17 +1261,10 @@ export class PullFeed {
       })),
     ];
 
-    if (isSolana) {
-      return program.instruction.pullFeedSubmitResponse(instructionData, {
-        accounts,
-        remainingAccounts,
-      });
-    } else {
-      return program.instruction.pullFeedSubmitResponseSvm(instructionData, {
-        accounts,
-        remainingAccounts,
-      });
-    }
+    return program.instruction.pullFeedSubmitResponse(instructionData, {
+      accounts,
+      remainingAccounts,
+    });
   }
 
   /**

@@ -60,6 +60,15 @@ module switchboard::serialization {
         value
     }
 
+    public fun peel_u64_le(self: &mut Bytes): u64 {
+        let value = 0u64;
+        for (i in 0..8) {
+            let byte = (vector::pop_back(&mut self.bytes) as u64);
+            value = value + (byte << (8 * i));
+        };
+        value
+    }
+
     public fun peel_u128(self: &mut Bytes): u128 {
         let value = 0u128;
         for (i in 0..16) {
@@ -67,6 +76,34 @@ module switchboard::serialization {
             value = value + (byte << (8 * (15 - i)));
         };
         value
+    }
+
+    public fun peel_u128_le(self: &mut Bytes): u128 {
+        let value = 0u128;
+        for (i in 0..16) {
+            let byte = (vector::pop_back(&mut self.bytes) as u128);
+            value = value + (byte << (8 * i));
+        };
+        value
+    }
+
+    fun decimal_from_i128_bits(result: u128): Decimal {
+        let two_pow_127: u128 = 170141183460469231731687303715884105728u128; // 2^127
+        let two_pow_128: u256 = 340282366920938463463374607431768211456; // 2^128
+
+        let neg = result >= two_pow_127;
+        let abs_value = if (neg) {
+            (two_pow_128 - (result as u256)) as u128
+        } else {
+            result
+        };
+
+        decimal::new(abs_value, neg)
+    }
+
+    public fun peel_decimal_i128_le(self: &mut Bytes): Decimal {
+        let value = peel_u128_le(self);
+        decimal_from_i128_bits(value)
     }
 
     /*
@@ -106,22 +143,7 @@ module switchboard::serialization {
         assert!(discriminator == 1, 1337);
         let aggregator = peel_address(&mut bytes);
         let result = peel_u128(&mut bytes);
-        
-        // Define the 2^127 and 2^128 constants
-        let two_pow_127: u128 = 170141183460469231731687303715884105728u128; // 2^127
-        let two_pow_128: u256 = 340282366920938463463374607431768211456; // 2^128
-
-        // Determine if the value is in the negative range
-        let neg = result >= two_pow_127;
-
-        // If neg, adjust to get the absolute value
-        let abs_value = if (neg) {
-            (two_pow_128 - (result as u256)) as u128
-        } else {
-            result
-        };
-
-        let value = decimal::new(abs_value, neg);
+        let value = decimal_from_i128_bits(result);
         let r = peel_vec(&mut bytes, 32);
         let s = peel_vec(&mut bytes, 32);
         let v = peel_u8(&mut bytes);
@@ -213,6 +235,69 @@ module switchboard::serialization {
         (discriminator, oracle_address, queue_address, mr_enclave, secp256k1_key, block_number, r, s, v, timestamp, guardian_address)
     }
 
+    public fun expected_v2_update_length(num_feeds: u64, num_signatures: u64): u64 {
+        18 + (num_feeds * 49) + (num_signatures * 97)
+    }
+
+    public fun parse_v2_update_bytes(vec: vector<u8>): (
+        u64,
+        u64,
+        vector<address>,
+        vector<Decimal>,
+        vector<u8>,
+        vector<address>,
+        vector<vector<u8>>,
+    ) {
+        assert!(vector::length(&vec) >= 18, 1339);
+
+        let bytes = new(vec);
+        let slot = peel_u64_le(&mut bytes);
+        let timestamp = peel_u64_le(&mut bytes);
+        let num_feeds = peel_u8(&mut bytes) as u64;
+        let num_signatures = peel_u8(&mut bytes) as u64;
+
+        assert!(
+            vector::length(&bytes.bytes) == ((num_feeds * 49) + (num_signatures * 97)),
+            1340
+        );
+
+        let aggregators = vector::empty<address>();
+        let values = vector::empty<Decimal>();
+        let min_oracle_samples = vector::empty<u8>();
+        let oracle_addresses = vector::empty<address>();
+        let signatures = vector::empty<vector<u8>>();
+
+        let feed_idx = 0;
+        while (feed_idx < num_feeds) {
+            let aggregator = peel_address(&mut bytes);
+            let value = peel_decimal_i128_le(&mut bytes);
+            let min_sample = peel_u8(&mut bytes);
+            vector::push_back(&mut aggregators, aggregator);
+            vector::push_back(&mut values, value);
+            vector::push_back(&mut min_oracle_samples, min_sample);
+            feed_idx = feed_idx + 1;
+        };
+
+        let signature_idx = 0;
+        while (signature_idx < num_signatures) {
+            let oracle_address = peel_address(&mut bytes);
+            let signature = peel_vec(&mut bytes, 65);
+            vector::push_back(&mut oracle_addresses, oracle_address);
+            vector::push_back(&mut signatures, signature);
+            signature_idx = signature_idx + 1;
+        };
+
+        (
+            slot,
+            timestamp,
+            aggregators,
+            values,
+            min_oracle_samples,
+            oracle_addresses,
+            signatures,
+        )
+    }
+
     public fun get_message_discriminator(vec: &vector<u8>): u8 {
         if (vector::length(vec) < 1) {
             return 0
@@ -258,6 +343,72 @@ module switchboard::serialization {
         assert!(v == 0, err);
         assert!(guardian_key == @0x347246323cd84b092828a32d197884b6296851a5a108d1d5b327a67344c72e33, err);
         assert!(timestamp == 1731017571, err);
+    }
+
+    #[test]
+    fun test_parse_v2_update_bytes() {
+        let err: u64 = 1340;
+        let vec = x"2a00000000000000d2029649000000000101aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaebfcffffffffffffffffffffffffffff05bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let (
+            slot,
+            timestamp,
+            aggregators,
+            values,
+            min_oracle_samples,
+            oracle_addresses,
+            signatures,
+        ) = parse_v2_update_bytes(vec);
+
+        assert!(slot == 42, err);
+        assert!(timestamp == 1234567890, err);
+        assert!(vector::length(&aggregators) == 1, err);
+        assert!(
+            *vector::borrow(&aggregators, 0)
+                == @0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,
+            err
+        );
+        assert!(vector::length(&values) == 1, err);
+        assert!(*vector::borrow(&values, 0) == decimal::new(789, true), err);
+        assert!(vector::length(&min_oracle_samples) == 1, err);
+        assert!(*vector::borrow(&min_oracle_samples, 0) == 5, err);
+        assert!(vector::length(&oracle_addresses) == 1, err);
+        assert!(
+            *vector::borrow(&oracle_addresses, 0)
+                == @0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,
+            err
+        );
+        assert!(vector::length(&signatures) == 1, err);
+        assert!(vector::length(vector::borrow(&signatures, 0)) == 65, err);
+        assert!(
+            *vector::borrow(vector::borrow(&signatures, 0), 0) == 0xcc,
+            err
+        );
+        assert!(
+            *vector::borrow(vector::borrow(&signatures, 0), 64) == 0xcc,
+            err
+        );
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1339, location = Self)]
+    fun test_parse_v2_update_bytes_rejects_truncated_headers() {
+        parse_v2_update_bytes(x"0000000000000000000000000000000000");
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1340, location = Self)]
+    fun test_parse_v2_update_bytes_rejects_declared_length_mismatches() {
+        parse_v2_update_bytes(
+            x"2a00000000000000d2029649000000000101aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaebfcffffffffffffffffffffffffffff05",
+        );
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 1340, location = Self)]
+    fun test_parse_v2_update_bytes_rejects_extra_trailing_bytes() {
+        parse_v2_update_bytes(
+            x"2a00000000000000d2029649000000000101aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaebfcffffffffffffffffffffffffffff05bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc00",
+        );
     }
 
 }
