@@ -16,9 +16,15 @@ import type {
   FetchSignaturesConsensusResponse,
 } from '../oracle-interfaces/gateway.js';
 import * as spl from '../utils/index.js';
-import { isMainnetConnection } from '../utils/index.js';
 import { loadLookupTables } from '../utils/index.js';
 import { getLutKey, getLutSigner } from '../utils/lookupTable.js';
+import {
+  getCrossbarNetworkForCluster,
+  getDefaultQueueAddressForCluster,
+  getOfficialClusterForProgramId,
+  normalizeSupportedSolanaCluster,
+  requireSupportedSolanaCluster,
+} from '../utils/solanaCluster.js';
 
 import { Oracle } from './oracle.js';
 import { Queue } from './queue.js';
@@ -105,7 +111,7 @@ export class OracleResponse {
 
 function padStringWithNullBytes(
   input: string,
-  desiredLength: number = 32
+  desiredLength = 32
 ): string {
   const nullByte = '\0';
   while (input.length < desiredLength) {
@@ -130,10 +136,6 @@ export function toFeedValue(
 
 function getIsSolana(chain?: string) {
   return chain === undefined || chain === 'solana';
-}
-
-function getIsMainnet(network?: string) {
-  return network === 'mainnet' || network === 'mainnet-beta';
 }
 
 /**
@@ -253,6 +255,21 @@ export class PullFeed {
     return this.network;
   }
 
+  private async resolveCrossbarNetwork(): Promise<CrossbarNetwork> {
+    if (this.network !== null) {
+      return this.network;
+    }
+
+    const cluster =
+      getOfficialClusterForProgramId(this.program.programId) ??
+      (await requireSupportedSolanaCluster(
+        this.program.provider.connection,
+        `PullFeed(${this.pubkey.toBase58()})`
+      ));
+    this.network = getCrossbarNetworkForCluster(cluster);
+    return this.network;
+  }
+
   static generate(program: Program): [PullFeed, web3.Keypair] {
     const keypair = web3.Keypair.generate();
     const feed = new PullFeed(program, keypair.publicKey);
@@ -364,19 +381,7 @@ export class PullFeed {
     if (this.jobs) {
       return this.jobs!;
     }
-
-    // Detect and cache network if not already set
-    if (this.network === null) {
-      const isMainnet = await isMainnetConnection(
-        this.program.provider.connection
-      );
-      this.network = isMainnet
-        ? CrossbarNetwork.SolanaMainnet
-        : CrossbarNetwork.SolanaDevnet;
-    }
-
-    // Set the crossbar network based on detected/cached network
-    crossbarClient.setNetwork(this.network);
+    crossbarClient.setNetwork(await this.resolveCrossbarNetwork());
 
     const configs = await this.loadConfigs();
     const feedHash = Buffer.from(configs.feedHash);
@@ -674,7 +679,7 @@ export class PullFeed {
    * @param params - The parameters object
    * @param params.feed - PullFeed address to fetch updates for
    * @param params.chain - Optional chain identifier (defaults to "solana")
-   * @param params.network - Optional network identifier ("mainnet", "mainnet-beta", "testnet", "devnet")
+   * @param params.network - Optional network identifier ("mainnet", "mainnet-beta", or "devnet")
    * @param params.numSignatures - Number of signatures to fetch
    * @param params.crossbarClient - Optional CrossbarClient instance to use
    * @param recentSlothashes - Optional array of recent slothashes as [BN, string] tuples
@@ -962,14 +967,14 @@ export class PullFeed {
     params: {
       feeds: PullFeed[];
       chain?: string;
-      network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
+      network?: 'mainnet' | 'mainnet-beta' | 'devnet';
       recentSlothashes?: Array<[BN, string]>;
       numSignatures: number;
       crossbarClient?: CrossbarClient;
       payer?: web3.PublicKey;
       variableOverrides?: Record<string, string>;
     },
-    debug: boolean = false
+    debug = false
   ): Promise<
     [
       web3.TransactionInstruction[],
@@ -978,7 +983,18 @@ export class PullFeed {
     ]
   > {
     const isSolana = getIsSolana(params.chain);
-    const isMainnet = getIsMainnet(params.network);
+    const cluster =
+      isSolana || !params.network
+        ? null
+        : normalizeSupportedSolanaCluster(
+            params.network,
+            'PullFeed.fetchUpdateManyLightIx'
+          );
+    if (!isSolana && !cluster) {
+      throw new Error(
+        'PullFeed.fetchUpdateManyLightIx requires network to be "mainnet" or "devnet" when chain is not "solana".'
+      );
+    }
 
     const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
 
@@ -1012,7 +1028,7 @@ export class PullFeed {
     // load the default queue for the specified network.
     const solanaQueue = isSolana
       ? queue
-      : spl.getDefaultQueueAddress(isMainnet);
+      : getDefaultQueueAddressForCluster(cluster!);
     if (debug) console.log(`Using queue ${solanaQueue.toBase58()}`);
 
     const response = await Queue.fetchSignaturesConsensus(

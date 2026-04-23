@@ -6,8 +6,14 @@ import {
 } from '../constants.js';
 import { Ed25519InstructionUtils } from '../instruction-utils/ed25519-instruction-utils.js';
 import { Gateway } from '../oracle-interfaces/gateway.js';
-import { isMainnetConnection } from '../utils/index.js';
 import { SignatureAuth } from '../utils/signatureAuth.js';
+import {
+  getCrossbarNetworkForCluster,
+  getOfficialClusterForProgramId,
+  normalizeSupportedSolanaCluster,
+  requireSupportedSolanaCluster,
+  UnsupportedSolanaClusterError,
+} from '../utils/solanaCluster.js';
 
 import { OracleQuote, QUOTE_PROGRAM_ID } from './oracleQuote.js';
 import { Source } from './source.js';
@@ -300,7 +306,7 @@ export class SurgeUpdate {
   toQuoteIx(
     queuePubkey: web3.PublicKey,
     payer: web3.PublicKey,
-    instructionIdx: number = 0
+    instructionIdx = 0
   ): web3.TransactionInstruction[] {
     const response = this.rawResponse;
 
@@ -727,7 +733,7 @@ export interface SurgeConfig {
   /** Chain identifier (defaults to "solana") */
   chain?: string;
   /** Network identifier */
-  network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
+  network?: 'mainnet' | 'mainnet-beta' | 'devnet';
   /** Optional queue for gateway discovery */
   queue?: Queue;
   /** Optional gateway URL override */
@@ -870,7 +876,6 @@ export class Surge extends EventEmitter {
 
     this.config = {
       chain: 'solana',
-      network: 'mainnet-beta',
       autoReconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
@@ -917,6 +922,53 @@ export class Surge extends EventEmitter {
    * Detects network lazily (following Queue/PullFeed pattern).
    * @private
    */
+  private async resolveCrossbarNetwork(): Promise<CrossbarNetwork> {
+    if (this.config.network) {
+      const cluster = normalizeSupportedSolanaCluster(
+        this.config.network,
+        'Surge'
+      );
+      return getCrossbarNetworkForCluster(cluster);
+    }
+
+    const queueNetwork = this.config.queue?.getNetwork();
+    if (queueNetwork) {
+      return queueNetwork;
+    }
+
+    const queueProgram = this.config.queue?.program;
+    const programCluster = queueProgram
+      ? getOfficialClusterForProgramId(queueProgram.programId)
+      : null;
+    if (programCluster) {
+      return getCrossbarNetworkForCluster(programCluster);
+    }
+
+    const connection =
+      this.config.queue?.program.provider.connection ?? this.config.connection;
+    if (connection) {
+      const cluster = await requireSupportedSolanaCluster(connection, 'Surge');
+      return getCrossbarNetworkForCluster(cluster);
+    }
+
+    try {
+      const env = await AnchorUtils.loadEnv();
+      const envNetwork = env.queue.getNetwork();
+      if (envNetwork) {
+        return envNetwork;
+      }
+      const cluster = await requireSupportedSolanaCluster(
+        env.connection,
+        'Surge'
+      );
+      return getCrossbarNetworkForCluster(cluster);
+    } catch (error) {
+      throw new Error(
+        `Surge could not determine a supported Solana network automatically. ${error instanceof Error ? error.message : 'Unknown error.'}`
+      );
+    }
+  }
+
   private async ensureGatewayUrl(): Promise<void> {
     // Skip if gateway URL already set or in crossbar mode
     if (this.config.gatewayUrl || this.config.crossbarMode) {
@@ -925,70 +977,18 @@ export class Surge extends EventEmitter {
 
     try {
       this.log('🔍 Gateway URL not provided, fetching from crossbar...');
-
-      // Lazy network detection (following Queue/PullFeed pattern)
-      // Get connection from queue > connection > loadEnv() > default to mainnet
-      let connection: web3.Connection | undefined;
-      if (this.config.queue) {
-        this.log(
-          '🔧 Using provided queue.program.provider.connection for network detection'
-        );
-        connection = this.config.queue.program.provider.connection;
-      } else if (this.config.connection) {
-        this.log('🔧 Using provided connection for network detection');
-        connection = this.config.connection;
-      } else {
-        // Auto-load from environment (Solana CLI config)
-        this.log(
-          '🔧 No queue/connection provided, attempting to load from Solana CLI config...'
-        );
-        try {
-          const env = await AnchorUtils.loadEnv();
-          connection = env.connection;
-          this.log(
-            `✅ Loaded connection from environment: ${connection.rpcEndpoint}`
-          );
-        } catch (err) {
-          this.log(
-            `⚠️ Could not load from environment (${err instanceof Error ? err.message : 'unknown error'}), will use fallback`
-          );
-        }
-      }
-
-      // Detect and set network if we have a connection
-      if (connection) {
-        try {
-          const isMainnet = await isMainnetConnection(connection);
-          const network = isMainnet
-            ? CrossbarNetwork.SolanaMainnet
-            : CrossbarNetwork.SolanaDevnet;
-          this.crossbar.setNetwork(network);
-          this.log(`🌐 Auto-detected network from connection: ${network}`);
-        } catch (err) {
-          this.log(
-            `⚠️ Failed to auto-detect network (${err instanceof Error ? err.message : 'unknown error'}), using default (mainnet)`
-          );
-        }
-      } else if (this.config.network) {
-        // Fallback: use configured network string
-        const network = this.config.network.includes('mainnet')
-          ? CrossbarNetwork.SolanaMainnet
-          : CrossbarNetwork.SolanaDevnet;
-        this.crossbar.setNetwork(network);
-        this.log(
-          `🌐 Using configured network string: ${this.config.network} → ${network}`
-        );
-      } else {
-        this.log(
-          '🌐 No network info available, using crossbar default (mainnet)'
-        );
-      }
+      const network = await this.resolveCrossbarNetwork();
+      this.crossbar.setNetwork(network);
+      this.log(`🌐 Using resolved network: ${network}`);
 
       const gateway = await this.crossbar.fetchGateway();
       this.config.gatewayUrl = gateway.gatewayUrl;
       this.gateway = gateway;
       this.log(`✅ Auto-fetched gateway: ${this.config.gatewayUrl}`);
     } catch (error) {
+      if (error instanceof UnsupportedSolanaClusterError) {
+        throw error;
+      }
       throw new Error(
         `Failed to fetch gateway from crossbar: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
@@ -1441,7 +1441,7 @@ export class Surge extends EventEmitter {
             data = new TextDecoder().decode(event.data as ArrayBuffer);
           }
           const message = JSON.parse(data);
-          this.handleWebSocketMessage(message);
+          void this.handleWebSocketMessage(message);
         } catch {
           this.emit('error', {
             type: 'processing',
@@ -1478,7 +1478,7 @@ export class Surge extends EventEmitter {
         try {
           const message = JSON.parse(data.toString());
 
-          this.handleWebSocketMessage(message);
+          void this.handleWebSocketMessage(message);
         } catch {
           this.emit('error', {
             type: 'processing',
@@ -1858,7 +1858,7 @@ export class Surge extends EventEmitter {
    * Wait for WebSocket to be in OPEN state before sending messages
    * @param timeoutMs Maximum time to wait in milliseconds
    */
-  private async waitForWebSocketReady(timeoutMs: number = 5000): Promise<void> {
+  private async waitForWebSocketReady(timeoutMs = 5000): Promise<void> {
     if (!this.ws) {
       throw new Error('WebSocket not initialized');
     }
@@ -1976,7 +1976,7 @@ export class Surge extends EventEmitter {
    */
   async validateFeeds(
     feeds: FeedSubscription[],
-    retryCount: number = 0
+    retryCount = 0
   ): Promise<void> {
     try {
       const surgeFeedsData = await this.getSurgeFeeds();

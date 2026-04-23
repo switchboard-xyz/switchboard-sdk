@@ -6,13 +6,29 @@ import {
   SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID,
   SPL_TOKEN_PROGRAM_ID,
 } from '../constants.js';
+import {
+  detectSupportedSolanaCluster,
+  getDefaultGuardianQueueAddressForCluster,
+  getDefaultQueueAddressForCluster,
+  getProgramIdForCluster,
+  ON_DEMAND_DEVNET_GUARDIAN_QUEUE,
+  ON_DEMAND_DEVNET_PID,
+  ON_DEMAND_DEVNET_QUEUE,
+  ON_DEMAND_DEVNET_QUEUE_PDA,
+  ON_DEMAND_MAINNET_GUARDIAN_QUEUE,
+  ON_DEMAND_MAINNET_PID,
+  ON_DEMAND_MAINNET_QUEUE,
+  ON_DEMAND_MAINNET_QUEUE_PDA,
+  requireSupportedSolanaCluster,
+  type SupportedSolanaCluster,
+  UnsupportedSolanaClusterError,
+} from './solanaCluster.js';
 
 import type { Program } from '@coral-xyz/anchor-31';
 import { web3 } from '@coral-xyz/anchor-31';
 import type { IOracleJob } from '@switchboard-xyz/common';
 import { CrossbarClient } from '@switchboard-xyz/common';
 import { LegacyCrossbarClient } from '@switchboard-xyz/common-legacy';
-import { Buffer } from 'buffer';
 
 type Account = {
   pubkey: web3.PublicKey;
@@ -52,63 +68,21 @@ export function createLoadLookupTables() {
 
 export const loadLookupTables = createLoadLookupTables();
 
-/**
- * Mainnet program and queue addresses
- *
- * These are the official Switchboard On-Demand addresses for mainnet.
- * Most applications should use the default queue rather than deploying
- * their own.
- */
+export {
+  ON_DEMAND_DEVNET_GUARDIAN_QUEUE,
+  ON_DEMAND_DEVNET_PID,
+  ON_DEMAND_DEVNET_QUEUE,
+  ON_DEMAND_DEVNET_QUEUE_PDA,
+  ON_DEMAND_MAINNET_GUARDIAN_QUEUE,
+  ON_DEMAND_MAINNET_PID,
+  ON_DEMAND_MAINNET_QUEUE,
+  ON_DEMAND_MAINNET_QUEUE_PDA,
+  UnsupportedSolanaClusterError,
+};
 
-/** Switchboard On-Demand program ID on mainnet */
-export const ON_DEMAND_MAINNET_PID = new web3.PublicKey(
-  'SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv'
-);
-
-/** Guardian queue for mainnet (internal use) */
-export const ON_DEMAND_MAINNET_GUARDIAN_QUEUE = new web3.PublicKey(
-  'B7WgdyAgzK7yGoxfsBaNnY6d41bTybTzEh4ZuQosnvLK'
-);
-
-/** Default oracle queue on mainnet - use this for production */
-export const ON_DEMAND_MAINNET_QUEUE = new web3.PublicKey(
-  'A43DyUGA7s8eXPxqEjJY6EBu1KKbNgfxF8h17VAHn13w'
-);
-
-/** Queue PDA (Program Derived Address) for mainnet */
-export const ON_DEMAND_MAINNET_QUEUE_PDA =
-  web3.PublicKey.findProgramAddressSync(
-    [Buffer.from('Queue'), ON_DEMAND_MAINNET_QUEUE.toBuffer()],
-    ON_DEMAND_MAINNET_PID
-  )[0];
-
-/**
- * Devnet program and queue addresses
- *
- * These are the official Switchboard On-Demand addresses for devnet.
- * Use these for development and testing.
- */
-
-/** Switchboard On-Demand program ID on devnet */
-export const ON_DEMAND_DEVNET_PID = new web3.PublicKey(
-  'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2'
-);
-
-/** Guardian queue for devnet (internal use) */
-export const ON_DEMAND_DEVNET_GUARDIAN_QUEUE = new web3.PublicKey(
-  'BeZ4tU4HNe2fGQGUzJmNS2UU2TcZdMUUgnCH6RPg4Dpi'
-);
-
-/** Default oracle queue on devnet - use this for testing */
-export const ON_DEMAND_DEVNET_QUEUE = new web3.PublicKey(
-  'EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7'
-);
-
-/** Queue PDA for devnet (note: uses mainnet PID for compatibility) */
-export const ON_DEMAND_DEVNET_QUEUE_PDA = web3.PublicKey.findProgramAddressSync(
-  [Buffer.from('Queue'), ON_DEMAND_DEVNET_QUEUE.toBuffer()],
-  ON_DEMAND_MAINNET_PID // SVM Devnet networks should be launched with SBond... as PID
-)[0];
+type DefaultClusterOptions = {
+  cluster?: SupportedSolanaCluster;
+};
 
 /**
  * Check if the connection is to the mainnet
@@ -118,12 +92,7 @@ export const ON_DEMAND_DEVNET_QUEUE_PDA = web3.PublicKey.findProgramAddressSync(
 export async function isMainnetConnection(
   connection: web3.Connection
 ): Promise<boolean> {
-  try {
-    const genesisHash = await connection.getGenesisHash();
-    return genesisHash === '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
-  } catch {
-    return false;
-  }
+  return (await detectSupportedSolanaCluster(connection)) === 'mainnet';
 }
 
 /**
@@ -134,12 +103,7 @@ export async function isMainnetConnection(
 export async function isDevnetConnection(
   connection: web3.Connection
 ): Promise<boolean> {
-  try {
-    const genesisHash = await connection.getGenesisHash();
-    return genesisHash === 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
-  } catch {
-    return false;
-  }
+  return (await detectSupportedSolanaCluster(connection)) === 'devnet';
 }
 
 /**
@@ -148,10 +112,13 @@ export async function isDevnetConnection(
  * @returns - Promise<PublicKey> - The program ID
  */
 export async function getProgramId(
-  connection: web3.Connection
+  connection: web3.Connection,
+  opts?: DefaultClusterOptions
 ): Promise<web3.PublicKey> {
-  const isDevnet = connection.rpcEndpoint.includes('devnet');
-  return isDevnet ? ON_DEMAND_DEVNET_PID : ON_DEMAND_MAINNET_PID;
+  const cluster =
+    opts?.cluster ??
+    (await requireSupportedSolanaCluster(connection, 'getProgramId'));
+  return getProgramIdForCluster(cluster);
 }
 
 /**
@@ -160,7 +127,7 @@ export async function getProgramId(
  * @returns - Promise<Queue> - The default devnet queue
  */
 export async function getDefaultDevnetQueue(
-  solanaRPCUrl: string = 'https://api.devnet.solana.com'
+  solanaRPCUrl = 'https://api.devnet.solana.com'
 ): Promise<Queue> {
   return getQueue({
     solanaRPCUrl,
@@ -174,7 +141,7 @@ export async function getDefaultDevnetQueue(
  * @returns - Promise<Queue> - The default devnet guardian queue
  */
 export async function getDefaultDevnetGuardianQueue(
-  solanaRPCUrl: string = 'https://api.devnet.solana.com'
+  solanaRPCUrl = 'https://api.devnet.solana.com'
 ): Promise<Queue> {
   return getQueue({
     solanaRPCUrl,
@@ -189,15 +156,16 @@ export async function getDefaultDevnetGuardianQueue(
  * @returns - web3.PublicKey: The default queue address
  */
 export function getDefaultQueueAddress(isMainnet: boolean) {
-  return isMainnet ? ON_DEMAND_MAINNET_QUEUE : ON_DEMAND_DEVNET_QUEUE;
+  return getDefaultQueueAddressForCluster(isMainnet ? 'mainnet' : 'devnet');
 }
 
 /**
  * Gets the default Switchboard queue for the specified network
  *
  * Automatically detects whether you're on mainnet or devnet and returns
- * the appropriate default queue. This is the recommended way to get started
- * with Switchboard On-Demand.
+ * the appropriate default queue. Automatic defaults support only official
+ * Solana mainnet-beta and devnet. Custom or local deployments should pass
+ * explicit program and queue addresses instead.
  *
  * @param {string} solanaRPCUrl - Solana RPC endpoint URL (defaults to mainnet)
  * @returns {Promise<Queue>} The default queue instance
@@ -212,27 +180,47 @@ export function getDefaultQueueAddress(isMainnet: boolean) {
  * ```
  */
 export async function getDefaultQueue(
-  solanaRPCUrl: string = web3.clusterApiUrl('mainnet-beta')
+  solanaRPCUrl: string = web3.clusterApiUrl('mainnet-beta'),
+  opts?: DefaultClusterOptions
 ): Promise<Queue> {
   const connection = new web3.Connection(solanaRPCUrl, 'confirmed');
-  const isMainnet = await isMainnetConnection(connection);
-  const queueAddress = getDefaultQueueAddress(isMainnet);
-  return getQueue({ solanaRPCUrl, queueAddress });
+  const cluster =
+    opts?.cluster ??
+    (await requireSupportedSolanaCluster(connection, 'getDefaultQueue'));
+  const program = await AnchorUtils.loadProgramFromConnection(
+    connection,
+    undefined,
+    getProgramIdForCluster(cluster)
+  );
+  return new Queue(program, getDefaultQueueAddressForCluster(cluster));
 }
 
 /**
- * Get the default guardian queue for the Switchboard program
+ * Get the default guardian queue for the Switchboard program.
+ *
+ * Automatic defaults support only official Solana mainnet-beta and devnet.
+ * Custom or local deployments should pass explicit program and queue addresses.
+ *
  * @param solanaRPCUrl - (optional) string: The Solana RPC URL
  * @returns - Promise<Queue> - The default guardian queue
- * @NOTE - SWITCHBOARD PID AND GUARDIAN QUEUE PUBKEY ARE WRONG
  */
 export async function getDefaultGuardianQueue(
-  solanaRPCUrl: string = web3.clusterApiUrl('mainnet-beta')
+  solanaRPCUrl: string = web3.clusterApiUrl('mainnet-beta'),
+  opts?: DefaultClusterOptions
 ): Promise<Queue> {
-  return getQueue({
-    solanaRPCUrl,
-    queueAddress: ON_DEMAND_MAINNET_GUARDIAN_QUEUE.toString(),
-  });
+  const connection = new web3.Connection(solanaRPCUrl, 'confirmed');
+  const cluster =
+    opts?.cluster ??
+    (await requireSupportedSolanaCluster(
+      connection,
+      'getDefaultGuardianQueue'
+    ));
+  const program = await AnchorUtils.loadProgramFromConnection(
+    connection,
+    undefined,
+    getProgramIdForCluster(cluster)
+  );
+  return new Queue(program, getDefaultGuardianQueueAddressForCluster(cluster));
 }
 
 /**

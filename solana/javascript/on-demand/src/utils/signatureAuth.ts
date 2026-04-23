@@ -35,7 +35,7 @@ export class SignatureAuth {
   private refreshInterval: number;
   private currentAuthData?: SignedAuthData;
   private refreshTimer?: NodeJS.Timeout;
-  private lastRefreshTime: number = 0;
+  private lastRefreshTime = 0;
 
   constructor(config: SignatureAuthConfig) {
     this.keypair = config.keypair;

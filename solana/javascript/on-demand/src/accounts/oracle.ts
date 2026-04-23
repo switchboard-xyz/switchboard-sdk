@@ -212,7 +212,7 @@ export class Oracle {
   //   program: Program,
   //   params: {
   //     chain?: string; // Unused atm
-  //     network?: 'mainnet' | 'mainnet-beta' | 'testnet' | 'devnet';
+  //     network?: 'mainnet' | 'mainnet-beta' | 'devnet';
   //     queue: web3.PublicKey; // Solana queue
   //     attestee: web3.PublicKey; // Solana attestee
   //     attester: web3.PublicKey; // Solana attester guardian we're requesting from
