@@ -32,15 +32,18 @@ ${GITHUB_PR_BODY}
 '''
     ),
     origin_files = glob([
-      "javacsript/**",
-      "solana/**"
+      "javascript/**",
+      "solana/**",
+      "evm/**"
     ]),
     # Only affect files under these paths in the destination
     destination_files = glob([
       "javascript/on-demand/**",
       "javascript/common/**",
+      "javascript/evm-sdk/**",
       "rust/switchboard-on-demand/**",
-      "rust/switchboard-on-demand-client/**"
+      "rust/switchboard-on-demand-client/**",
+      "rust/switchboard-evm/**"
     ]),
     transformations = [
       ## move the solana SDKs to their original paths
@@ -55,6 +58,15 @@ ${GITHUB_PR_BODY}
       core.move(
         before = "solana/rust/switchboard-on-demand-client",
         after = "rust/switchboard-on-demand-client"
+      ),
+      ## move the EVM SDKs to their original paths
+      core.move(
+        before = "evm/javascript/evm-sdk",
+        after = "javascript/evm-sdk"
+      ),
+      core.move(
+        before = "evm/rust/switchboard-evm",
+        after = "rust/switchboard-evm"
       )
     ],
     authoring = authoring.pass_thru("Copybara <copybara@example.com>")
