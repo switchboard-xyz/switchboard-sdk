@@ -13,9 +13,15 @@ import { Gateway } from '../oracle-interfaces/gateway.js';
 import {
   getAssociatedTokenAddress,
   getNodePayer,
-  isMainnetConnection,
 } from '../utils/index.js';
 import { getLutKey, getLutSigner } from '../utils/lookupTable.js';
+import {
+  getCrossbarNetworkForCluster,
+  getDefaultQueueAddressForCluster,
+  getOfficialClusterForProgramId,
+  requireSupportedSolanaCluster,
+  UnsupportedSolanaClusterError,
+} from '../utils/solanaCluster.js';
 
 import { Oracle } from './oracle.js';
 import type { SwitchboardPermission } from './permission.js';
@@ -197,7 +203,7 @@ export interface QueueAccountData {
 export class Queue {
   private data: QueueAccountData | null = null;
   private lookupTable: web3.AddressLookupTableAccount | null = null;
-  private lookupTableRefreshTime: number = 0;
+  private lookupTableRefreshTime = 0;
   private network: CrossbarNetwork | null = null; // Cache network detection
   static readonly DEFAULT_DEVNET_KEY: web3.PublicKey = new web3.PublicKey(
     'EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7'
@@ -223,14 +229,16 @@ export class Queue {
    * ```
    */
   static async loadDefault(program: Program): Promise<Queue> {
-    try {
-      const queue = new Queue(program, Queue.DEFAULT_MAINNET_KEY);
-      await queue.loadData();
-      return queue;
-    } catch {
-      // do nothing
+    const cluster = getOfficialClusterForProgramId(program.programId);
+    if (!cluster) {
+      throw new UnsupportedSolanaClusterError(
+        'Queue.loadDefault',
+        ` Program ${program.programId.toBase58()} is not an official Switchboard mainnet/devnet program ID.`
+      );
     }
-    const queue = new Queue(program, Queue.DEFAULT_DEVNET_KEY);
+    const queue = new Queue(program, getDefaultQueueAddressForCluster(cluster));
+    queue.setNetwork(getCrossbarNetworkForCluster(cluster));
+    await queue.loadData();
     return queue;
   }
 
@@ -243,21 +251,11 @@ export class Queue {
   async fetchGatewayByLatestVersion(
     crossbar: CrossbarClient
   ): Promise<Gateway> {
-    // Detect and cache network if not already set
-    if (this.network === null) {
-      const isMainnet = await isMainnetConnection(
-        this.program.provider.connection
-      );
-      this.network = isMainnet
-        ? CrossbarNetwork.SolanaMainnet
-        : CrossbarNetwork.SolanaDevnet;
-    }
-
-    // Set the crossbar network based on detected/cached network
-    crossbar.setNetwork(this.network);
+    const network = await this.resolveCrossbarNetwork();
+    crossbar.setNetwork(network);
 
     const gatewayUrls = await crossbar.fetchGateways(
-      this.network === CrossbarNetwork.SolanaMainnet ? 'mainnet' : 'devnet'
+      network === CrossbarNetwork.SolanaMainnet ? 'mainnet' : 'devnet'
     );
     const gatewayHealths: Array<{
       url: string;
@@ -608,6 +606,21 @@ export class Queue {
     return this.network;
   }
 
+  private async resolveCrossbarNetwork(): Promise<CrossbarNetwork> {
+    if (this.network !== null) {
+      return this.network;
+    }
+
+    const cluster =
+      getOfficialClusterForProgramId(this.program.programId) ??
+      (await requireSupportedSolanaCluster(
+        this.program.provider.connection,
+        `Queue(${this.pubkey.toBase58()})`
+      ));
+    this.network = getCrossbarNetworkForCluster(cluster);
+    return this.network;
+  }
+
   /**
    *  Loads the queue data from on chain and returns the listed oracle keys.
    *
@@ -643,19 +656,7 @@ export class Queue {
     variableOverrides?: Record<string, string>;
   }): Promise<FetchSignaturesConsensusResponse> {
     const crossbarClient = params.crossbarClient ?? CrossbarClient.default();
-
-    // Detect and cache network if not already set
-    if (this.network === null) {
-      const isMainnet = await isMainnetConnection(
-        this.program.provider.connection
-      );
-      this.network = isMainnet
-        ? CrossbarNetwork.SolanaMainnet
-        : CrossbarNetwork.SolanaDevnet;
-    }
-
-    // Set the crossbar network based on detected/cached network
-    crossbarClient.setNetwork(this.network);
+    crossbarClient.setNetwork(await this.resolveCrossbarNetwork());
 
     const gateway = await crossbarClient.fetchGateway();
 
@@ -1051,19 +1052,7 @@ export class Queue {
       numSignatures: 1,
       instructionIdx: 0,
     };
-
-    // Detect and cache network if not already set
-    if (this.network === null) {
-      const isMainnet = await isMainnetConnection(
-        this.program.provider.connection
-      );
-      this.network = isMainnet
-        ? CrossbarNetwork.SolanaMainnet
-        : CrossbarNetwork.SolanaDevnet;
-    }
-
-    // Set the crossbar network based on detected/cached network
-    crossbar.setNetwork(this.network);
+    crossbar.setNetwork(await this.resolveCrossbarNetwork());
 
     // Fetch gateway from crossbar
     let gateway: Gateway;
@@ -1323,19 +1312,7 @@ export class Queue {
       numSignatures: 1,
       instructionIdx: 0,
     };
-
-    // Detect and cache network if not already set
-    if (this.network === null) {
-      const isMainnet = await isMainnetConnection(
-        this.program.provider.connection
-      );
-      this.network = isMainnet
-        ? CrossbarNetwork.SolanaMainnet
-        : CrossbarNetwork.SolanaDevnet;
-    }
-
-    // Set the crossbar network based on detected/cached network
-    crossbar.setNetwork(this.network);
+    crossbar.setNetwork(await this.resolveCrossbarNetwork());
 
     // Handle both feed hashes and OracleFeed array input
     let feedHashes: string[];

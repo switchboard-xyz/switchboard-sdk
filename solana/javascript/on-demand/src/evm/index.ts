@@ -343,11 +343,11 @@ async function fetchUpdateData(
   crossbarUrl: string,
   chainId: string,
   feedId: string,
-  minResponses: number = 1,
-  maxVariance: number = 1e9,
-  numSignatures: number = 1,
-  syncOracles: boolean = true,
-  syncGuardians: boolean = true,
+  minResponses = 1,
+  maxVariance = 1e9,
+  numSignatures = 1,
+  syncOracles = true,
+  syncGuardians = true,
   gateway?: string
 ): Promise<FetchFeedResponse> {
   const cleanedCrossbarUrl = crossbarUrl.endsWith('/')
