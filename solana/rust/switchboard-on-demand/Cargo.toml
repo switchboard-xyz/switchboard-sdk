@@ -38,14 +38,19 @@ pid_override = []
 ## Client functionality for off-chain interactions (Gateway, Crossbar, transaction builders).
 ## Uses Solana SDK v2 with anchor-client compatibility.
 ## Includes: RPC client, transaction building, oracle feeds, and Crossbar integration.
-client = ["anchor-lang", "tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v2", "dep:solana-account-decoder-v2", "dep:solana-client-v2", "dep:solana-sdk-v2", "dep:chrono", "dep:futures-util", "dep:spl-associated-token-account", "dep:tokio-tungstenite", "dep:url"]
+client = ["anchor-lang", "tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v2", "secp256k1-host", "dep:solana-account-decoder-v2", "dep:solana-client-v2", "dep:solana-sdk-v2", "dep:chrono", "dep:futures-util", "dep:spl-associated-token-account", "dep:tokio-tungstenite", "dep:url"]
 
 ## Alias for `client` feature - explicitly uses Solana SDK v2.
 client-v2 = ["client"]
 
 ## Client feature using Solana v3 crates.
 ## Uses v2 compat modules for types that haven't been published for v3 yet.
-client-v3 = ["tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v3", "dep:solana-account-decoder-v3", "dep:solana-client-v3", "dep:solana-sdk-v3", "dep:solana-sdk-v2"]
+client-v3 = ["tokio", "futures", "reqwest", "prost", "dashmap", "tokio-stream", "bs58", "hex", "base64", "serde_json", "switchboard-utils", "solana-v3", "secp256k1-host", "dep:solana-account-decoder-v3", "dep:solana-client-v3", "dep:solana-sdk-v3", "dep:solana-sdk-v2"]
+
+## Enables host-only secp256k1 functionality such as signing and std-backed helpers.
+## Keep this disabled for SBF/CPI builds; normal host cargo trees may still include
+## getrandom through Solana host-only dependencies even when SBF builds are safe.
+secp256k1-host = ["libsecp256k1/std", "libsecp256k1/hmac"]
 
 ## Configures the crate for Solana devnet deployment.
 devnet = []
@@ -104,8 +109,8 @@ solana-account-decoder-v2 = { package = "solana-account-decoder", version = ">=2
 solana-account-decoder-v3 = { package = "solana-account-decoder", version = ">=3", optional = true }
 solana-client-v2 = { package = "solana-client", version = ">=2,<3", optional = true }
 solana-client-v3 = { package = "solana-client", version = ">=3", optional = true }
-solana-program-v2 = { package = "solana-program", version = ">=2,<3", optional = true }
-solana-program-v3 = { package = "solana-program", version = ">=3", optional = true }
+solana-program-v2 = { package = "solana-program", version = ">=2,<3", default-features = false, features = ["borsh"], optional = true }
+solana-program-v3 = { package = "solana-program", version = ">=3", default-features = false, features = ["borsh"], optional = true }
 solana-sdk-v2 = { package = "solana-sdk", version = ">=2,<3", optional = true }
 solana-sdk-v3 = { package = "solana-sdk", version = ">=3", optional = true }
 spl-associated-token-account = { version = "6.0", optional = true }
