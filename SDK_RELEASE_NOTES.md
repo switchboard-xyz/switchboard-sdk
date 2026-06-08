@@ -7,7 +7,7 @@ The newest release batch should stay at the top.
 
 ### `@switchboard-xyz/on-demand@3.10.4`
 
-Status: planned.
+Status: prepared; dry-run verified.
 
 - Fixed Solana network resolution so official Switchboard program IDs resolve to the correct cluster defaults.
 - Fixed randomness oracle eligibility so healthy pull oracles are not rejected only because `enable_gateway = 0`; `enable_pull_oracle` remains the relevant eligibility gate.
@@ -15,14 +15,14 @@ Status: planned.
 
 ### `switchboard-on-demand-client@0.6.0`
 
-Status: planned.
+Status: prepared; dry-run verified.
 
 - Updated the client crate for Solana 3.x crate compatibility.
 - Fixed release guardrail paths so crate packaging checks use the `solana/rust/switchboard-on-demand-client` mirror layout.
 
 ### `switchboard-on-demand@0.12.2`
 
-Status: planned.
+Status: prepared; dry-run verified.
 
 - Preserved Crossbar feed simulation results when building update instructions.
 - Fixed Sui result deserialization and removed noisy client logs.
