@@ -97,7 +97,9 @@ export type OracleInfo = {
 export type FetchSignaturesRequest = {
   feedHash: string;
   numSignatures: number;
+  /** Maximum variance already scaled by 1e9 (1_000_000_000 = 1%). */
   maxVariance: number;
+  /** Minimum number of job responses required, unscaled. */
   minResponses: number;
   useTimestamp?: boolean;
   gateway?: string;
@@ -111,7 +113,9 @@ export type FetchSignaturesRequest = {
 export type FeedRequest = {
   // For FeedRequestV1
   jobsB64Encoded?: string[];
+  /** Maximum variance already scaled by 1e9 (1_000_000_000 = 1%). */
   maxVariance?: number;
+  /** Minimum number of job responses required, unscaled. */
   minResponses?: number;
   // For FeedRequestV2
   feedProtoB64?: string;

@@ -63,7 +63,7 @@ console.log("Switchboard address:", switchboardAddress);
 //   name: "BTC/USD",
 //   minSampleSize: 1,
 //   maxStalenessSeconds: 60,
-//   maxVariance: 1e9,
+//   maxVariance: 1e9, // 1%, scaled by 1e9
 //   feedHash:
 //     "0x937efd0ba38a4db89364ea2c07de8873e443955b893ba5bcb2edaa611fb13a78",
 //   minResponses: 1,

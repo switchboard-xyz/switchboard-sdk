@@ -38,8 +38,8 @@ export * as message from './message.js';
 export interface FeedUpdateCommonOptions {
   jobs: OracleJob[]; // Array of job definitions
   numSignatures?: number; // Number of signatures to fetch
-  maxVariance?: number; // Maximum variance allowed for the feed
-  minResponses?: number; // Minimum number of responses to consider the feed valid
+  maxVariance?: number; // Maximum variance scaled by 1e9 (1e9 = 1%)
+  minResponses?: number; // Minimum number of responses to consider the feed valid, unscaled
   recentHash?: string; // Hex string of length 64 (32 bytes) which does not start with 0x
   aggregatorId?: string; // Specify the aggregator ID if the feed already exists
   blockNumber?: number; // The block number
@@ -109,7 +109,9 @@ export interface FetchResultsArgs {
   feedIds: string[];
   chainId: number;
   crossbarUrl?: string;
+  /** Minimum number of responses, unscaled. */
   minResponses?: number;
+  /** Maximum variance scaled by 1e9 (1e9 = 1%). */
   maxVariance?: number;
   numSignatures?: number;
   syncOracles?: boolean;
@@ -122,7 +124,9 @@ export interface FetchResultArgs {
   feedId: string;
   chainId: number;
   crossbarUrl?: string;
+  /** Minimum number of responses, unscaled. */
   minResponses?: number;
+  /** Maximum variance scaled by 1e9 (1e9 = 1%). */
   maxVariance?: number;
   numSignatures?: number;
   syncOracles?: boolean;
@@ -628,8 +632,8 @@ export async function fetchRandomness({
  * @param crossbarUrl The Crossbar URL
  * @param chainId The chain ID
  * @param feedId The feed ID
- * @param minResponses Minimum number of responses
- * @param maxVariance Maximum variance
+ * @param minResponses Minimum number of responses, unscaled
+ * @param maxVariance Maximum variance scaled by 1e9 (1e9 = 1%)
  * @param numSignatures Number of signatures
  * @param syncOracles Sync oracles
  * @param syncGuardians Sync guardians

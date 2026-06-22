@@ -84,7 +84,7 @@ pub fn get_or_create_feed_metadata(
         jobs: vec![oracle_job.clone()],
         min_job_responses: Some(STREAMING_MIN_RESPONSES),
         min_oracle_samples: Some(STREAMING_MIN_ORACLE_SAMPLES),
-        max_job_range_pct: Some(1), // 100% range for streaming
+        max_job_range_pct: Some(1), // Single-job streaming feed; raw v2 percent uses 1e9 scale.
     };
     
     // Encode to base64

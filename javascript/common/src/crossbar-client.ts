@@ -51,8 +51,8 @@ export class CrossbarClient {
   /**
    * Create a FeedRequestV1 object
    * @param {string[]} jobsB64Encoded - Base64 encoded oracle jobs
-   * @param {number} maxVariance - Maximum variance allowed for the feed
-   * @param {number} minResponses - Minimum number of oracle responses required
+   * @param {number} maxVariance - Maximum variance allowed for the feed, already scaled by 1e9 (1_000_000_000 = 1%)
+   * @param {number} minResponses - Minimum number of job responses required, unscaled
    * @returns {FeedRequest} - A FeedRequestV1 object
    */
   static createFeedRequestV1(
@@ -670,7 +670,7 @@ export class CrossbarClient {
    * // Using FeedRequestV1
    * const feedRequestV1 = CrossbarClient.createFeedRequestV1(
    *   ['base64EncodedJob1', 'base64EncodedJob2'],
-   *   1000000, // maxVariance
+   *   1_000_000_000, // maxVariance: 1%, scaled by 1e9
    *   3        // minResponses
    * );
    *

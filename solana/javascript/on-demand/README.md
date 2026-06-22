@@ -48,6 +48,10 @@ const [pullIx] = await feedAccount.fetchUpdateIx({ numSignatures: 3 });
 ## Getting Started
 To start building your own on-demand oracle with Switchboard, you can refer to the oracle specification in our [documentation](https://protos.docs.switchboard.xyz/protos/OracleJob).
 
+### Feed Parameter Units
+
+Solana helper methods such as `PullFeed.initIx` and `PullFeed.setConfigsIx` accept human-percent `maxVariance` values and scale them by `1e9` internally. Raw v2 `OracleFeed.maxJobRangePct` values are already scaled integers, so `1_000_000_000` means `1%`. `minJobResponses` and `minOracleSamples` are unscaled counts. See [Feed Parameter Units](https://docs.switchboard.xyz/custom-feeds/advanced-feed-configuration/feed-parameter-units).
+
 ### Example Code Snippet:
 ```typescript
 const [pullIx] = await feedAccount.fetchUpdateIx({ numSignatures: 3 });
@@ -176,4 +180,3 @@ const feedHashes = [
   Buffer.from('1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', 'hex')
 ];
 ```
-

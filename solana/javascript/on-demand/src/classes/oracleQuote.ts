@@ -24,12 +24,14 @@ export type QuoteSourceScheme = 'oracle' | 'authority';
 export interface FeedInfo {
   feedHash: Buffer;
   value: bigint;
+  /** Unscaled oracle/signature quorum for this feed. */
   minOracleSamples: number;
 }
 
 export interface AuthorityFeedInfoInput {
   feedHash: string | Buffer;
   value: bigint;
+  /** Unscaled oracle/signature quorum for this feed. */
   minOracleSamples?: number;
 }
 
@@ -60,6 +62,7 @@ export interface SwitchboardQuoteJSON {
   feeds: Array<{
     feedHash: string;
     value: string;
+    /** Unscaled oracle/signature quorum for this feed. */
     minOracleSamples: number;
   }>;
   oracleIdxs: number[];

@@ -74,7 +74,9 @@ export interface PullFeedAccountData {
   feedHash: Uint8Array;
   initializedAt: BN;
   permissions: BN;
+  /** Stored maximum variance scaled by 1e9. */
   maxVariance: BN;
+  /** Unscaled job/source quorum. */
   minResponses: number;
   name: Uint8Array;
   sampleSize: number;
@@ -186,7 +188,7 @@ async function checkNeedsInit(
  * await pullFeed.initIx({
  *   name: "BTC/USD",
  *   queue: queuePubkey,
- *   maxVariance: 1.0,
+ *   maxVariance: 1.0, // 1%; this helper scales by 1e9 internally
  *   minResponses: 3,
  *   feedHash: jobHash,
  * });
@@ -202,7 +204,9 @@ export class PullFeed {
   pubkey: web3.PublicKey;
   configs: {
     queue: web3.PublicKey;
+    /** Human percent; init/set helpers scale by 1e9 internally. */
     maxVariance: number;
+    /** Unscaled job/source quorum. */
     minResponses: number;
     feedHash: Buffer;
     minSampleSize: number;
@@ -302,8 +306,11 @@ export class PullFeed {
     params: {
       name: string;
       queue: web3.PublicKey;
+      /** Human percent; scaled by 1e9 internally. */
       maxVariance: number;
+      /** Unscaled job/source quorum. */
       minResponses: number;
+      /** Unscaled oracle/sample quorum. */
       minSampleSize: number;
       maxStaleness: number;
       permitWriteByAuthority?: boolean;
@@ -398,9 +405,9 @@ export class PullFeed {
    * @param {Program} program - The Anchor program instance.
    * @param {PublicKey} queue - The queue account public key.
    * @param {Array<IOracleJob>} jobs - The oracle jobs to execute.
-   * @param {number} maxVariance - The maximum variance allowed for the feed.
-   * @param {number} minResponses - The minimum number of job responses required.
-   * @param {number} minSampleSize - The minimum number of samples required for setting feed value.
+   * @param {number} maxVariance - The maximum variance allowed for the feed as a human percent; scaled by 1e9 internally.
+   * @param {number} minResponses - The minimum number of job responses required, unscaled.
+   * @param {number} minSampleSize - The minimum number of samples required for setting feed value, unscaled.
    * @param {number} maxStaleness - The maximum number of slots that can pass before a feed value is considered stale.
    * @returns {Promise<web3.TransactionInstruction>} A promise that resolves to the transaction instruction.
    */
@@ -500,9 +507,9 @@ export class PullFeed {
    * @param params
    * @param params.feedHash - The hash of the feed as a `Uint8Array` or hexadecimal `string`. Only results signed with this hash will be accepted.
    * @param params.authority - The authority of the feed.
-   * @param params.maxVariance - The maximum variance allowed for the feed.
-   * @param params.minResponses - The minimum number of responses required.
-   * @param params.minSampleSize - The minimum number of samples required for setting feed value.
+   * @param params.maxVariance - The maximum variance allowed for the feed as a human percent; scaled by 1e9 internally.
+   * @param params.minResponses - The minimum number of responses required, unscaled.
+   * @param params.minSampleSize - The minimum number of samples required for setting feed value, unscaled.
    * @param params.maxStaleness - The maximum number of slots that can pass before a feed value is considered stale.
    * @returns A promise that resolves to the transaction instruction to set feed configs.
    */
@@ -649,7 +656,9 @@ export class PullFeed {
    */
   async loadConfigs(force?: boolean): Promise<{
     queue: web3.PublicKey;
+    /** Human percent, converted from the stored 1e9-scaled value. */
     maxVariance: number;
+    /** Unscaled job/source quorum. */
     minResponses: number;
     feedHash: Buffer;
     minSampleSize: number;

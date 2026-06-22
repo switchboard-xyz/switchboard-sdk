@@ -124,8 +124,11 @@ pub struct SuiOracleResult {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SuiFeedConfigs {
     pub feedHash: String,
+    /// Percent scaled by 1e9 (1_000_000_000 = 1%).
     pub maxVariance: u64,
+    /// Unscaled job/source quorum.
     pub minResponses: u64,
+    /// Unscaled oracle/sample quorum.
     pub minSampleSize: u64,
 }
 

@@ -8,9 +8,9 @@ import type { IOracleFeed, IOracleJob } from '../protos.js';
  * Configuration for a feed request to oracle operators (V1)
  */
 export type FeedRequestV1 = {
-  /** Maximum allowed variance between oracle responses (e.g., 1.0 = 100%) */
+  /** Maximum allowed variance as a human percent; Gateway helpers scale by 1e9 (1.0 = 1%). */
   maxVariance?: number;
-  /** Minimum number of oracle responses required */
+  /** Minimum number of job responses required, unscaled. */
   minResponses?: number;
   /** Array of oracle job definitions */
   jobs: IOracleJob[];
@@ -21,7 +21,7 @@ export type FeedRequestV1 = {
  * Uses protobuf-encoded feed instead of individual job definitions
  */
 export type FeedRequestV2 = {
-  /** Oracle feed proto definition */
+  /** Oracle feed proto definition. feed.maxJobRangePct is already scaled by 1e9 (1_000_000_000 = 1%). */
   feed: IOracleFeed;
 };
 

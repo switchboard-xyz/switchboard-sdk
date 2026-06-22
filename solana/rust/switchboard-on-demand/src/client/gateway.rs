@@ -185,8 +185,8 @@ impl Gateway {
     /// * `params.recent_hash` - The recent hash of the feed
     /// * `params.encoded_jobs` - The encoded jobs
     /// * `params.num_signatures` - The number of signatures to fetch
-    /// * `params.max_variance` - The maximum variance
-    /// * `params.min_responses` - The minimum number of responses
+    /// * `params.max_variance` - The maximum variance as a human percent; scaled by 1e9 internally
+    /// * `params.min_responses` - The minimum number of responses, unscaled
     /// * `params.use_timestamp` - Whether to use the timestamp
     /// # Returns
     /// * `Result<FeedEvalResponseSingle, reqwest::Error>`
@@ -368,7 +368,9 @@ pub struct FetchSignaturesParams {
     pub recent_hash: Option<String>,
     pub encoded_jobs: Vec<String>,
     pub num_signatures: u32,
+    /// Human percent; scaled by 1e9 before sending the gateway request.
     pub max_variance: Option<u32>,
+    /// Unscaled job/source quorum.
     pub min_responses: Option<u32>,
     pub use_timestamp: Option<bool>,
 }
@@ -376,7 +378,9 @@ pub struct FetchSignaturesParams {
 #[derive(Debug, Clone)]
 pub struct FeedConfig {
     pub encoded_jobs: Vec<String>,
+    /// Human percent; scaled by 1e9 before sending the gateway request.
     pub max_variance: Option<u32>,
+    /// Unscaled job/source quorum.
     pub min_responses: Option<u32>,
 }
 
@@ -384,9 +388,9 @@ pub struct FeedConfig {
 pub struct BatchFeedRequest {
     /// Vec of jobs to process. Each group is equivalent to 1 feed.
     pub jobs_b64_encoded: Vec<String>,
-    /// Allowed variance in the feed values
+    /// Allowed variance in the feed values, already scaled by 1e9
     pub max_variance: u64,
-    /// Minimum number of responses required for the feed
+    /// Minimum number of responses required for the feed, unscaled
     pub min_responses: u32,
 }
 

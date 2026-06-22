@@ -33,8 +33,11 @@ export interface SuiAggregatorResponse {
   results: SuiResult[];
   feedConfigs: {
     feedHash: string;
+    /** Percent scaled by 1e9 (1_000_000_000 = 1%). */
     maxVariance: number;
+    /** Unscaled job/source quorum. */
     minResponses: number;
+    /** Unscaled oracle/sample quorum. */
     minSampleSize: number;
   };
   failures: string[];
@@ -68,8 +71,11 @@ export interface IotaAggregatorResponse {
   results: IotaResult[];
   feedConfigs: {
     feedHash: string;
+    /** Percent scaled by 1e9 (1_000_000_000 = 1%). */
     maxVariance: number;
+    /** Unscaled job/source quorum. */
     minResponses: number;
+    /** Unscaled oracle/sample quorum. */
     minSampleSize: number;
   };
   failures: string[];

@@ -18,6 +18,8 @@ The script refuses to package from a dirty tree, refuses non-`main` branches unl
 ## Gateways
 The frontend to interact with Switchboard oracles.
 
+Gateway helper parameters named `max_variance` accept human percentages and scale by `1e9` before sending gateway requests. Raw v2 `OracleFeed.max_job_range_pct` values are already scaled integers, so `1_000_000_000` means `1%`. `min_job_responses` and `min_oracle_samples` are unscaled counts. See [Feed Parameter Units](https://docs.switchboard.xyz/custom-feeds/advanced-feed-configuration/feed-parameter-units).
+
 ## Example
 
 ```rust

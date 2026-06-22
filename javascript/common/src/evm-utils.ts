@@ -246,7 +246,7 @@ export class EVMUtils {
    * Convert a Surge update to EVM encoded format
    * Format: slot(8) + timestamp(8) + numFeeds(1) + numSigs(1) + feeds(49*n) + sigs(65*m)
    * @param surgeUpdate - The SurgeUpdate from Switchboard Surge
-   * @param options - Optional parameters including minOracleSamples
+   * @param options - Optional parameters including minOracleSamples, an unscaled oracle-sample quorum
    * @returns Hex-encoded string in EVM format
    */
   static convertSurgeUpdateToEvmFormat(

@@ -198,6 +198,8 @@ export class Gateway {
    * REST API endpoint: /api/v1/fetch_signatures_consensus
    *
    * @param feedConfigs Array of feed configurations to fetch signatures for.
+   * V1 feed config `maxVariance` is a human percent (1 = 1%) and is scaled by 1e9 here.
+   * V2 feed config `feed.maxJobRangePct` must already be a raw scaled integer (1_000_000_000 = 1%).
    * @param useTimestamp Whether to use the timestamp in the response & to encode update signature.
    * @param numSignatures The number of oracles to fetch signatures from.
    * @param useEd25519 Whether to use Ed25519 signatures instead of secp256k1.

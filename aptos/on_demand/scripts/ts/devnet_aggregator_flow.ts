@@ -64,7 +64,7 @@ const aggregatorInitTx = await Aggregator.initTx(client, signer, {
   name: "BTC/USD",
   minSampleSize: 1,
   maxStalenessSeconds: 60,
-  maxVariance: 1e9,
+  maxVariance: 1e9, // 1%, scaled by 1e9
   feedHash:
     "0x558be89a28d20c32f4cd427dd0dc05229ffefb8c17396124d0bbb0e5efd0a04f",
   minResponses: 1,
@@ -120,4 +120,3 @@ const resTx = await aptos.signAndSubmitTransaction({
 const resultTx = await waitForTx(aptos, resTx.hash);
 
 console.log("Transaction result:", resultTx);
-

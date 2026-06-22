@@ -155,10 +155,10 @@ const minSampleSize = 1;
 const maxStalenessSeconds = 60;
 
 // If jobs diverge more than 1%, don't allow the feed to produce a valid update
-const maxVariance = 1e9;
+const maxVariance = 1e9; // 1%, scaled by 1e9 for this chain parameter
 
-// Require only 1 job response
-const minJobResponses = 1;
+// Require only 1 job response (unscaled count)
+const minJobResponses = 1; // unscaled job/source quorum
 
 //==========================================================
 // Feed Initialization On-Chain

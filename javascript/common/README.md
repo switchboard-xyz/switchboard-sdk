@@ -73,3 +73,9 @@ import { simulateOracleJobs } from "@switchboard-xyz/common";
 const result = await simulateOracleJobs([oracleJob]);
 console.log(result);
 ```
+
+## Feed Parameter Units
+
+Raw v2 `OracleFeed.maxJobRangePct` values are fixed-point percentages scaled by `1e9`: `1_000_000_000` means `1%`. `minJobResponses` and `minOracleSamples` are unscaled counts.
+
+Some SDK gateway helpers accept human-percent `maxVariance` values and scale them internally, while low-level Crossbar/gateway request bodies expect already-scaled integers. See [Feed Parameter Units](https://docs.switchboard.xyz/custom-feeds/advanced-feed-configuration/feed-parameter-units) before copying validation values between APIs.

@@ -1133,17 +1133,17 @@ export class Queue {
    * );
    *
    * // Using OracleFeed objects
-   * const btcFeed: IOracleFeed = {
-   *   name: 'BTC/USD Price Feed',
-   *   jobs: [btcJob1, btcJob2],
-   *   minOracleSamples: 3,
+ * const btcFeed: IOracleFeed = {
+ *   name: 'BTC/USD Price Feed',
+ *   jobs: [btcJob1, btcJob2],
+ *   minOracleSamples: 3, // unscaled oracle-sample quorum
    *   // ... other feed properties
    * };
    *
-   * const ethFeed: IOracleFeed = {
-   *   name: 'ETH/USD Price Feed',
-   *   jobs: [ethJob1, ethJob2],
-   *   minOracleSamples: 3,
+ * const ethFeed: IOracleFeed = {
+ *   name: 'ETH/USD Price Feed',
+ *   jobs: [ethJob1, ethJob2],
+ *   minOracleSamples: 3, // unscaled oracle-sample quorum
    * };
    *
    * const feedsIx = await queue.fetchQuoteIx(
@@ -1416,17 +1416,17 @@ export class Queue {
    * );
    *
    * // Using OracleFeed objects
-   * const btcFeed: IOracleFeed = {
-   *   name: 'BTC/USD Price Feed',
-   *   jobs: [btcJob1, btcJob2],
-   *   minOracleSamples: 3,
+ * const btcFeed: IOracleFeed = {
+ *   name: 'BTC/USD Price Feed',
+ *   jobs: [btcJob1, btcJob2],
+ *   minOracleSamples: 3, // unscaled oracle-sample quorum
    *   // ... other feed properties
    * };
    *
-   * const ethFeed: IOracleFeed = {
-   *   name: 'ETH/USD Price Feed',
-   *   jobs: [ethJob1, ethJob2],
-   *   minOracleSamples: 3,
+ * const ethFeed: IOracleFeed = {
+ *   name: 'ETH/USD Price Feed',
+ *   jobs: [ethJob1, ethJob2],
+ *   minOracleSamples: 3, // unscaled oracle-sample quorum
    * };
    *
    * const instructionsFromFeeds = await queue.fetchManagedUpdateIxs(
