@@ -156,10 +156,8 @@ impl PullFeed {
             .get_account_data(key)
             .await
             .map_err(|_| anyhow!("PullFeed.load_data: Account not found"))?;
-        let account = account[8..].to_vec();
-        let data = bytemuck::try_from_bytes::<PullFeedAccountData>(&account)
-            .map_err(|_| anyhow!("PullFeed.load_data: Failed to parse data"))?;
-        Ok(*data)
+        PullFeedAccountData::parse_unaligned(&account)
+            .context("PullFeed.load_data: Failed to parse data")
     }
 
     fn get_solana_submit_signatures_ix(
