@@ -1,4 +1,5 @@
 use crate::*;
+use anyhow_ext::anyhow;
 use anyhow_ext::Context;
 use bytemuck;
 use rust_decimal::Decimal;
@@ -138,6 +139,36 @@ impl OracleSubmission {
 }
 
 impl PullFeedAccountData {
+    /// Anchor account discriminator (`sha256("account:PullFeedAccountData")[..8]`).
+    const DISCRIMINATOR: [u8; 8] = [196, 27, 108, 196, 10, 215, 219, 40];
+
+    /// Parses pull feed account data from raw bytes into an owned value, with no alignment requirement.
+    pub fn parse_unaligned(data: &[u8]) -> Result<Self, AnyhowError> {
+        if data.len() < Self::DISCRIMINATOR.len() {
+            return Err(anyhow!(
+                "PullFeedAccountData::parse_unaligned: missing discriminator"
+            ));
+        }
+
+        let mut disc_bytes = [0u8; 8];
+        disc_bytes.copy_from_slice(&data[..8]);
+        if disc_bytes != Self::DISCRIMINATOR {
+            return Err(anyhow!(
+                "PullFeedAccountData::parse_unaligned: invalid discriminator"
+            ));
+        }
+
+        let expected_size = std::mem::size_of::<Self>() + 8;
+        if data.len() < expected_size {
+            return Err(anyhow!(
+                "PullFeedAccountData::parse_unaligned: data too small"
+            ));
+        }
+
+        bytemuck::try_pod_read_unaligned::<Self>(&data[8..expected_size])
+            .map_err(|_| anyhow!("PullFeedAccountData::parse_unaligned: failed to parse data"))
+    }
+
     /// The median value of the submissions needed for quorom size
     pub fn value(&self) -> Decimal {
         self.result.value()

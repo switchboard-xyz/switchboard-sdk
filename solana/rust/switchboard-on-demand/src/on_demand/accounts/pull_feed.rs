@@ -306,6 +306,27 @@ impl PullFeedAccountData {
         }
     }
 
+    /// Parses pull feed account data from raw bytes into an owned value, with no alignment requirement.
+    pub fn parse_unaligned(data: &[u8]) -> Result<Self, OnDemandError> {
+        if data.len() < Self::DISCRIMINATOR.len() {
+            return Err(OnDemandError::InvalidDiscriminator);
+        }
+
+        let mut disc_bytes = [0u8; 8];
+        disc_bytes.copy_from_slice(&data[..8]);
+        if disc_bytes != Self::DISCRIMINATOR {
+            return Err(OnDemandError::InvalidDiscriminator);
+        }
+
+        let expected_size = std::mem::size_of::<Self>() + 8;
+        if data.len() < expected_size {
+            return Err(OnDemandError::InvalidData);
+        }
+
+        bytemuck::try_pod_read_unaligned::<Self>(&data[8..expected_size])
+            .map_err(|_| OnDemandError::AccountDeserializeError)
+    }
+
     /// Generate a checksum for the given feed hash, result, slothash, max_variance and min_responses
     /// This is signed by the oracle and used to verify that the data submitted by the oracles is valid.
     pub fn generate_checksum(&self, result: i128, slothash: [u8; 32]) -> [u8; 32] {
