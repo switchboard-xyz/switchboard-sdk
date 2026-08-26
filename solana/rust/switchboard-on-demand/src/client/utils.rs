@@ -18,7 +18,7 @@ use crate::solana_compat::compute_budget::ComputeBudgetInstruction;
 use crate::solana_compat::hash::Hash;
 use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::solana_compat::{
-    address_lookup_table::AddressLookupTableAccount,
+    AddressLookupTableAccount,
     to_message_address_lookup_table_account,
     MessageAddressLookupTableAccount,
 };

@@ -172,9 +172,12 @@ pub use solana_program_v2::address_lookup_table::AddressLookupTableAccount;
 ))]
 pub use solana_program::address_lookup_table::AddressLookupTableAccount;
 
-// For v3 when used with client-v3, get it from our v2-compat re-exported address_lookup_table module
+// For v3 with client-v3, use the v3-native message LUT account so client code speaks v3
+// end-to-end and hands back the same `AddressLookupTableAccount` a v3 consumer builds v0
+// messages with. The v2 `address_lookup_table` module above stays available for the on-chain
+// `state` parser and `program::id()` only (not yet split out for v3).
 #[cfg(all(feature = "solana-v3", feature = "client-v3"))]
-pub use address_lookup_table::AddressLookupTableAccount;
+pub use solana_sdk::message::AddressLookupTableAccount;
 
 #[cfg(all(any(feature = "client", feature = "client-v2"), not(feature = "client-v3")))]
 pub type MessageAddressLookupTableAccount = AddressLookupTableAccount;
@@ -184,7 +187,7 @@ pub type MessageAddressLookupTableAccount = solana_sdk::message::AddressLookupTa
 
 #[cfg(any(feature = "client", feature = "client-v2", feature = "client-v3"))]
 pub fn to_message_address_lookup_table_account(
-    lut: &address_lookup_table::AddressLookupTableAccount,
+    lut: &AddressLookupTableAccount,
 ) -> MessageAddressLookupTableAccount {
     MessageAddressLookupTableAccount {
         key: lut.key.to_bytes().into(),

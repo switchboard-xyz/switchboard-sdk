@@ -4,7 +4,7 @@ use crate::Pubkey;
 use crate::solana_program::instruction::{Instruction, AccountMeta};
 use crate::solana_compat::address_lookup_table::state::AddressLookupTable;
 use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
-use crate::solana_compat::address_lookup_table::AddressLookupTableAccount;
+use crate::solana_compat::AddressLookupTableAccount;
 use crate::solana_compat::{
     to_message_address_lookup_table_account,
     MessageAddressLookupTableAccount,
@@ -527,7 +527,7 @@ impl TransactionBuilder {
             AddressLookupTable::deserialize(&account.data).map_err(|_| OnDemandError::AccountDeserializeError)?;
         let address_lookup_table_account = AddressLookupTableAccount {
             key: address_lookup_table_pubkey.to_bytes().into(),
-            addresses: address_lookup_table.addresses.to_vec(),
+            addresses: address_lookup_table.addresses.iter().map(|a| a.to_bytes().into()).collect(),
         };
         Ok(address_lookup_table_account)
     }
@@ -553,7 +553,7 @@ impl TransactionBuilder {
                         .map_err(|_| OnDemandError::AccountDeserializeError)?;
                     let address_lookup_table_account = AddressLookupTableAccount {
                         key: address_lookup_pubkeys[i].to_bytes().into(),
-                        addresses: address_lookup_table.addresses.to_vec(),
+                        addresses: address_lookup_table.addresses.iter().map(|a| a.to_bytes().into()).collect(),
                     };
                     address_lookup_accounts.push(address_lookup_table_account);
                 }

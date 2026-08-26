@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use anyhow::Error as AnyhowError;
 use crate::solana_compat::solana_client::nonblocking::rpc_client::RpcClient;
 use crate::solana_compat::address_lookup_table::state::AddressLookupTable;
-use crate::solana_compat::address_lookup_table::AddressLookupTableAccount;
+use crate::solana_compat::AddressLookupTableAccount;
 use crate::solana_compat::solana_sdk::pubkey::Pubkey as SdkPubkey;
 use crate::solana_compat::address_lookup_table;
 use crate::Pubkey;
@@ -42,7 +42,7 @@ pub async fn load_lookup_table<T: LutOwner + bytemuck::Pod>(
     let parsed_lut = AddressLookupTable::deserialize(&lut_account)
         .map_err(|_| anyhow!("LutOwner.load_lookup_table: Invalid LUT data"))?;
     Ok(AddressLookupTableAccount {
-        addresses: parsed_lut.addresses.to_vec(),
+        addresses: parsed_lut.addresses.iter().map(|a| a.to_bytes().into()).collect(),
         key: lut_key.to_bytes().into(),
     })
 }
@@ -101,7 +101,7 @@ pub async fn load_lookup_tables_for_program<T: LutOwner + bytemuck::Pod>(
         let parsed_lut = AddressLookupTable::deserialize(lut_data);
         if let Ok(parsed_lut) = parsed_lut {
             out.push(AddressLookupTableAccount {
-                addresses: parsed_lut.addresses.to_vec(),
+                addresses: parsed_lut.addresses.iter().map(|a| a.to_bytes().into()).collect(),
                 key: lut_keys[idx].to_bytes().into(),
             });
         }

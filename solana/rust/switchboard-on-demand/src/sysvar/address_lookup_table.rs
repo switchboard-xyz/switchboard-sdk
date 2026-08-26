@@ -41,7 +41,7 @@ cfg_client! {
             .map_err(|_| OnDemandError::AddressLookupTableDeserializeError)?;
         let out = AddressLookupTableAccount {
             key: address.to_bytes().into(),
-            addresses: lut.addresses.iter().cloned().collect(),
+            addresses: lut.addresses.iter().map(|a| a.to_bytes().into()).collect(),
         };
         Ok(out)
     }
